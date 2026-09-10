@@ -1,6 +1,5 @@
 import path from "node:path";
 import fs from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import postgres from "postgres";
 
 /**
@@ -18,6 +17,11 @@ import postgres from "postgres";
  *
  * The Postgres schema lives in supabase/migrations/0001_init.sql and must be
  * kept in step with SQLITE_SCHEMA below.
+ *
+ * `node:sqlite` is imported lazily and only on the SQLite path. It is behind
+ * --experimental-sqlite until Node 23.4, so a static import crashes on
+ * Node 22 — which is what most hosts, Vercel included, still default to —
+ * even for a deployment that only ever talks to Postgres.
  */
 
 export type Driver = "postgres" | "sqlite";
@@ -111,10 +115,21 @@ type SqliteHandle = {
 
 let _sqlite: SqliteHandle | null = null;
 
-function sqlite(): SqliteHandle {
+async function sqlite(): Promise<SqliteHandle> {
   if (_sqlite) return _sqlite;
+  let DatabaseSync: new (p: string) => unknown;
+  try {
+    ({ DatabaseSync } = (await import("node:sqlite")) as unknown as {
+      DatabaseSync: new (p: string) => unknown;
+    });
+  } catch {
+    throw new Error(
+      "node:sqlite is unavailable on this Node build. Set DATABASE_URL to use " +
+        "Postgres, or run Node 23.4+ (or Node 22 with --experimental-sqlite).",
+    );
+  }
   if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
-  const handle = new DatabaseSync(DB_PATH) as unknown as SqliteHandle;
+  const handle = new DatabaseSync(DB_PATH) as SqliteHandle;
   handle.exec("PRAGMA journal_mode = WAL;");
   handle.exec("PRAGMA foreign_keys = ON;");
   handle.exec(SQLITE_SCHEMA);
@@ -173,9 +188,7 @@ export async function q<T = Record<string, unknown>>(sql: string, params: unknow
   if (driver === "postgres") {
     return (await pg().unsafe(toPgPlaceholders(sql), params)) as T[];
   }
-  return sqlite()
-    .prepare(sql)
-    .all(...forSqlite(params)) as T[];
+  return (await sqlite()).prepare(sql).all(...forSqlite(params)) as T[];
 }
 
 export async function one<T = Record<string, unknown>>(
@@ -191,14 +204,12 @@ export async function exec(sql: string, params: unknown[] = []): Promise<void> {
     await pg().unsafe(toPgPlaceholders(sql), params);
     return;
   }
-  sqlite()
-    .prepare(sql)
-    .run(...forSqlite(params));
+  (await sqlite()).prepare(sql).run(...forSqlite(params));
 }
 
 /** Postgres schema is applied by migration; SQLite builds itself on first use. */
 export async function ensureSchema(): Promise<void> {
-  if (driver === "sqlite") sqlite();
+  if (driver === "sqlite") await sqlite();
 }
 
 /**
