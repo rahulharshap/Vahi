@@ -6,11 +6,11 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "seed": "node --experimental-strip-types src/lib/seed.ts",
     "test:pg": "node tests/postgres.test.mjs",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "db:seed": "node --env-file=.env.local scripts/seed.mjs",
-    "test": "node tests/postgres.test.mjs"
+    "test": "node tests/compliance.test.mjs && node tests/postgres.test.mjs",
+    "test:rules": "node tests/compliance.test.mjs"
   },
   "dependencies": {
     "next": "15.5.25",
