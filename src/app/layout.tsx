@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
+import DemoBanner from "@/components/DemoBanner";
 import { firmSafe } from "@/lib/store";
 import { driver } from "@/lib/db";
 import { seedIfEmpty } from "@/lib/seed";
@@ -29,11 +30,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     }
   }
   const f = await firmSafe();
+  // set NEXT_PUBLIC_DEMO_MODE=false once this holds a real firm's data
+  const demo = process.env.NEXT_PUBLIC_DEMO_MODE !== "false";
   return (
     <html lang="en">
       <body>
         <Nav firmName={f.name} city={f.city} />
-        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-12">{children}</main>
+        {demo ? <DemoBanner /> : null}
+        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-4 md:px-6 md:pb-12">{children}</main>
       </body>
     </html>
   );
