@@ -7,8 +7,8 @@ import { resyncAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-export default function Board() {
-  const d = dashboard();
+export default async function Board() {
+  const d = await dashboard();
   const overdue = d.buckets.OVERDUE;
   const critical = d.buckets.CRITICAL;
   const atRisk = d.buckets.AT_RISK;

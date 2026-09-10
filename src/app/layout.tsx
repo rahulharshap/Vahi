@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
 import { firm } from "@/lib/store";
+import { driver } from "@/lib/db";
 import { seedIfEmpty } from "@/lib/seed";
 
 export const metadata: Metadata = {
@@ -18,9 +19,10 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  seedIfEmpty();
-  const f = firm();
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // local SQLite builds and seeds itself; Postgres is seeded by POST /api/seed
+  if (driver === "sqlite") await seedIfEmpty();
+  const f = await firm();
   return (
     <html lang="en">
       <body>

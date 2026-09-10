@@ -5,19 +5,19 @@ import { Empty, RiskPill, prettyDate, rupees } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function Clients() {
-  const clients = listClients();
+export default async function Clients() {
+  const clients = await listClients();
   const today = todayISO();
 
-  const rows = clients.map((c) => {
-    const filings = listFilings({ clientId: c.id, from: addDays(today, -200), to: addDays(today, 200) });
+  const rows = await Promise.all(clients.map(async (c) => {
+    const filings = await listFilings({ clientId: c.id, from: addDays(today, -200), to: addDays(today, 200) });
     const open = filings.filter((f) => f.status !== "FILED" && f.status !== "NOT_APPLICABLE");
     const overdue = open.filter((f) => f.risk === "OVERDUE");
     const next = open.filter((f) => f.daysLeft >= 0)[0];
     const exposure = open.reduce((s, f) => s + f.exposure, 0);
     const worst = overdue.length ? "OVERDUE" : open.some((f) => f.risk === "CRITICAL") ? "CRITICAL" : open.some((f) => f.risk === "AT_RISK") ? "AT_RISK" : "ON_TRACK";
     return { c, open: open.length, overdue: overdue.length, next, exposure, worst: worst as never };
-  });
+  }));
 
   const sorted = [...rows].sort((a, b) => b.overdue - a.overdue || b.exposure - a.exposure);
 

@@ -1,4 +1,4 @@
-import { all, run } from "./db";
+import { q, exec, uid, nowISO } from "./db";
 import {
   FIRM_ID,
   addDays,
@@ -10,7 +10,6 @@ import {
   type ClientInput,
 } from "./store";
 import { composeChase, type Stage } from "./whatsapp";
-import { uid } from "./db";
 
 /**
  * Demo roster for a mid-size Hyderabad practice. Deliberately messy in the way
@@ -55,33 +54,33 @@ function rng(seed: number) {
   };
 }
 
-export function seedIfEmpty(): boolean {
-  const existing = all<{ n: number }>("SELECT COUNT(*) AS n FROM clients WHERE firm_id=?", [FIRM_ID]);
-  if (existing[0]?.n > 0) return false;
+export async function seedIfEmpty(): Promise<boolean> {
+  const existing = await q<{ n: number | string }>("SELECT COUNT(*) AS n FROM clients WHERE firm_id=?", [FIRM_ID]);
+  if (Number(existing[0]?.n ?? 0) > 0) return false;
   return reseed();
 }
 
-export function reseed(): boolean {
-  ensureFirm("Rao & Associates, Chartered Accountants", "Hyderabad");
-  run("DELETE FROM messages");
-  run("DELETE FROM filings");
-  run("DELETE FROM clients WHERE firm_id=?", [FIRM_ID]);
+export async function reseed(): Promise<boolean> {
+  await ensureFirm("Rao & Associates, Chartered Accountants", "Hyderabad");
+  await exec("DELETE FROM messages");
+  await exec("DELETE FROM filings");
+  await exec("DELETE FROM clients WHERE firm_id=?", [FIRM_ID]);
 
-  for (const c of CLIENTS) createClient(c);
+  for (const c of CLIENTS) await createClient(c);
 
   const today = todayISO();
-  syncAllFilings(addDays(today, -220), addDays(today, 200));
+  await syncAllFilings(addDays(today, -220), addDays(today, 200));
 
   // Backfill a believable working state: older filings mostly done, recent ones
   // in varying stages, a handful chronically stuck.
   const rand = rng(20260910);
-  const rows = listFilings({});
+  const rows = await listFilings({});
   for (const f of rows) {
     const r = rand();
     if (f.daysLeft < -25) {
       // long past - almost everything is filed
       if (r < 0.94) {
-        run("UPDATE filings SET status='FILED', filed_at=? , docs_received=? WHERE id=?", [
+        await exec("UPDATE filings SET status='FILED', filed_at=? , docs_received=? WHERE id=?", [
           addDays(f.effectiveDue, -2) + " 11:00:00",
           f.docs_required,
           f.id,
@@ -90,29 +89,29 @@ export function reseed(): boolean {
     } else if (f.daysLeft < 0) {
       // recently past due - a realistic tail of stragglers
       if (r < 0.62) {
-        run("UPDATE filings SET status='FILED', filed_at=?, docs_received=? WHERE id=?", [
+        await exec("UPDATE filings SET status='FILED', filed_at=?, docs_received=? WHERE id=?", [
           addDays(f.effectiveDue, -1) + " 16:30:00",
           f.docs_required,
           f.id,
         ]);
       } else if (r < 0.78) {
-        run("UPDATE filings SET status='IN_PROGRESS', docs_received=? WHERE id=?", [f.docs_required, f.id]);
+        await exec("UPDATE filings SET status='IN_PROGRESS', docs_received=? WHERE id=?", [f.docs_required, f.id]);
       } else if (r < 0.9) {
-        partialDocs(f.id, f.docsRequiredList, rand);
+        await partialDocs(f.id, f.docsRequiredList, rand);
       }
     } else if (f.daysLeft <= 20) {
       if (r < 0.28) {
-        run("UPDATE filings SET status='DOCS_RECEIVED', docs_received=? WHERE id=?", [f.docs_required, f.id]);
+        await exec("UPDATE filings SET status='DOCS_RECEIVED', docs_received=? WHERE id=?", [f.docs_required, f.id]);
       } else if (r < 0.42) {
-        run("UPDATE filings SET status='IN_PROGRESS', docs_received=? WHERE id=?", [f.docs_required, f.id]);
+        await exec("UPDATE filings SET status='IN_PROGRESS', docs_received=? WHERE id=?", [f.docs_required, f.id]);
       } else if (r < 0.7) {
-        partialDocs(f.id, f.docsRequiredList, rand);
+        await partialDocs(f.id, f.docsRequiredList, rand);
       }
     }
   }
 
   // A few historical chases so the activity feed is not empty on first load.
-  const chaseable = listFilings({ from: addDays(today, -20), to: addDays(today, 15) }).filter(
+  const chaseable = (await listFilings({ from: addDays(today, -20), to: addDays(today, 15) })).filter(
     (f) => f.docsOutstanding.length > 0 && f.status !== "FILED",
   );
   const firmName = "Rao & Associates";
@@ -129,7 +128,7 @@ export function reseed(): boolean {
         firmName,
         penaltyNote: f.penalty_note,
       });
-      run(
+      await exec(
         "INSERT INTO messages (id, filing_id, client_id, stage, body, status, sent_at, created_at) VALUES (?,?,?,?,?,?,?,?)",
         [
           uid("msg"),
@@ -147,8 +146,8 @@ export function reseed(): boolean {
   return true;
 }
 
-function partialDocs(filingId: string, required: string[], rand: () => number) {
+async function partialDocs(filingId: string, required: string[], rand: () => number) {
   if (required.length < 2) return;
   const keep = required.filter(() => rand() < 0.5);
-  run("UPDATE filings SET docs_received=?, status='AWAITING_DOCS' WHERE id=?", [JSON.stringify(keep), filingId]);
+  await exec("UPDATE filings SET docs_received=?, status='AWAITING_DOCS' WHERE id=?", [JSON.stringify(keep), filingId]);
 }

@@ -10,11 +10,11 @@ export const dynamic = "force-dynamic";
 
 export default async function ClientDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const c = getClient(id);
+  const c = await getClient(id);
   if (!c) notFound();
 
   const today = todayISO();
-  const filings = listFilings({ clientId: id, from: addDays(today, -200), to: addDays(today, 200) });
+  const filings = await listFilings({ clientId: id, from: addDays(today, -200), to: addDays(today, 200) });
   const open = filings.filter((f) => f.status !== "FILED" && f.status !== "NOT_APPLICABLE");
   const overdue = open.filter((f) => f.risk === "OVERDUE");
   const upcoming = open.filter((f) => f.daysLeft >= 0);

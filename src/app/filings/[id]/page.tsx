@@ -12,10 +12,10 @@ const STATUSES: FilingStatus[] = ["AWAITING_DOCS", "DOCS_RECEIVED", "IN_PROGRESS
 
 export default async function FilingDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const f = getFiling(id);
+  const f = await getFiling(id);
   if (!f) notFound();
 
-  const messages = listMessages(id);
+  const messages = await listMessages(id);
   const stage = dueStage(f);
   const extend = setExtendedDueAction.bind(null, id);
 
@@ -27,7 +27,7 @@ export default async function FilingDetail({ params }: { params: Promise<{ id: s
         periodLabel: f.period_label,
         dueDate: f.effectiveDue,
         docsOutstanding: f.docsOutstanding,
-        firmName: firm().name,
+        firmName: (await firm()).name,
         penaltyNote: f.penalty_note,
       })
     : null;

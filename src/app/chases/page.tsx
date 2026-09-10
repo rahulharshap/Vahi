@@ -14,10 +14,10 @@ const STAGE_TONE: Record<Stage, string> = {
   OVERDUE: "var(--danger)",
 };
 
-export default function Chases() {
-  const queue = pendingChases();
-  const history = recentMessages(25);
-  const f = firm();
+export default async function Chases() {
+  const queue = await pendingChases();
+  const history = await recentMessages(25);
+  const f = await firm();
 
   return (
     <div className="space-y-6">
@@ -120,7 +120,7 @@ export default function Chases() {
             {history.map((m) => (
               <div key={m.id} className="flex items-start gap-3 px-3.5 py-2.5">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-semibold text-ink">{m.clientName}</div>
+                  <div className="truncate text-[13px] font-semibold text-ink">{m.clientname}</div>
                   <div className="truncate text-[11.5px] text-ink-3">{m.title}</div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">

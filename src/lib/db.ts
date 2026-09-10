@@ -1,24 +1,48 @@
-import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import fs from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import postgres from "postgres";
 
 /**
- * Single-file SQLite via Node's built-in driver. No native build step, no
- * external service. The schema is deliberately Postgres-shaped so moving to
- * Supabase later is a dialect change, not a redesign.
+ * Dual-driver data layer.
+ *
+ *   DATABASE_URL set  -> Postgres (Supabase). Used in production.
+ *   DATABASE_URL unset -> SQLite via Node's built-in driver. Used locally, so
+ *                         the app runs with no external service and no native
+ *                         build step.
+ *
+ * Both paths speak the same SQL subset. Queries use `?` placeholders and are
+ * rewritten to `$n` for Postgres. Timestamps are generated in JS rather than
+ * with `datetime('now')` / `now()` so the SQL stays dialect-neutral. Booleans
+ * are passed as JS booleans and coerced to 0/1 for SQLite.
+ *
+ * The Postgres schema lives in supabase/migrations/0001_init.sql and must be
+ * kept in step with SQLITE_SCHEMA below.
  */
+
+export type Driver = "postgres" | "sqlite";
+
+export const driver: Driver = process.env.DATABASE_URL ? "postgres" : "sqlite";
+
+export function nowISO(): string {
+  return new Date().toISOString().replace("T", " ").slice(0, 19);
+}
+
+export function uid(prefix: string): string {
+  return prefix + "_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
+// --------------------------------------------------------------- sqlite path
 
 const DB_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DB_DIR, "vahi.db");
 
-let _db: DatabaseSync | null = null;
-
-export const SCHEMA = `
+export const SQLITE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS firms (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   city        TEXT NOT NULL,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS clients (
@@ -37,11 +61,10 @@ CREATE TABLE IF NOT EXISTS clients (
   contact_name   TEXT,
   contact_phone  TEXT,
   active         INTEGER NOT NULL DEFAULT 1,
-  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_clients_firm ON clients(firm_id);
 
--- One row per (client, obligation, period). Regenerated idempotently.
 CREATE TABLE IF NOT EXISTS filings (
   id              TEXT PRIMARY KEY,
   client_id       TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -52,7 +75,6 @@ CREATE TABLE IF NOT EXISTS filings (
   period_key      TEXT NOT NULL,
   period_label    TEXT NOT NULL,
   due_date        TEXT NOT NULL,
-  -- set when CBDT/CBIC extends a deadline; overrides due_date everywhere
   extended_due    TEXT,
   status          TEXT NOT NULL DEFAULT 'AWAITING_DOCS',
   docs_required   TEXT NOT NULL DEFAULT '[]',
@@ -61,14 +83,13 @@ CREATE TABLE IF NOT EXISTS filings (
   assignee        TEXT,
   filed_at        TEXT,
   notes           TEXT,
-  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at      TEXT NOT NULL,
   UNIQUE (client_id, obligation_code, period_key)
 );
 CREATE INDEX IF NOT EXISTS idx_filings_due ON filings(due_date);
 CREATE INDEX IF NOT EXISTS idx_filings_client ON filings(client_id);
 CREATE INDEX IF NOT EXISTS idx_filings_status ON filings(status);
 
--- Every chase we send to a client, and what came back.
 CREATE TABLE IF NOT EXISTS messages (
   id         TEXT PRIMARY KEY,
   filing_id  TEXT NOT NULL REFERENCES filings(id) ON DELETE CASCADE,
@@ -78,40 +99,104 @@ CREATE TABLE IF NOT EXISTS messages (
   body       TEXT NOT NULL,
   status     TEXT NOT NULL DEFAULT 'QUEUED',
   sent_at    TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_filing ON messages(filing_id);
 `;
 
-export function db(): DatabaseSync {
-  if (_db) return _db;
+type SqliteHandle = {
+  prepare: (sql: string) => { all: (...p: unknown[]) => unknown[]; run: (...p: unknown[]) => unknown };
+  exec: (sql: string) => void;
+};
+
+let _sqlite: SqliteHandle | null = null;
+
+function sqlite(): SqliteHandle {
+  if (_sqlite) return _sqlite;
   if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
-  const handle = new DatabaseSync(DB_PATH);
+  const handle = new DatabaseSync(DB_PATH) as unknown as SqliteHandle;
   handle.exec("PRAGMA journal_mode = WAL;");
   handle.exec("PRAGMA foreign_keys = ON;");
-  handle.exec(SCHEMA);
-  _db = handle;
+  handle.exec(SQLITE_SCHEMA);
+  _sqlite = handle;
   return handle;
 }
 
-export function all<T = Record<string, unknown>>(sql: string, params: unknown[] = []): T[] {
-  return db()
-    .prepare(sql)
-    .all(...(params as never[])) as T[];
+/** SQLite has no boolean type and rejects JS booleans outright. */
+function forSqlite(params: unknown[]): unknown[] {
+  return params.map((p) => (typeof p === "boolean" ? (p ? 1 : 0) : p === undefined ? null : p));
 }
 
-export function get<T = Record<string, unknown>>(sql: string, params: unknown[] = []): T | undefined {
-  return db()
-    .prepare(sql)
-    .get(...(params as never[])) as T | undefined;
+// ------------------------------------------------------------- postgres path
+
+type PgSql = {
+  unsafe: (sql: string, params: unknown[]) => Promise<unknown[]>;
+  end: () => Promise<void>;
+};
+
+let _pg: PgSql | null = null;
+
+function pg(): PgSql {
+  if (_pg) return _pg;
+  const passthrough = (oid: number) => ({
+    to: oid,
+    from: [oid],
+    serialize: (x: unknown) => x as string,
+    parse: (x: string) => x,
+  });
+  _pg = postgres(process.env.DATABASE_URL!, {
+    // Supabase's transaction pooler does not support prepared statements
+    prepare: false,
+    max: Number(process.env.PG_POOL_MAX ?? 5),
+    idle_timeout: 20,
+    connect_timeout: 15,
+    // Keep dates and timestamps as strings so both drivers hand the app the
+    // same shape. Everything downstream compares ISO strings.
+    types: {
+      date: passthrough(1082),
+      timestamp: passthrough(1114),
+      timestamptz: passthrough(1184),
+    },
+  } as never) as unknown as PgSql;
+  return _pg;
 }
 
-export function run(sql: string, params: unknown[] = []) {
-  return db()
-    .prepare(sql)
-    .run(...(params as never[]));
+/** `?` placeholders -> `$1..$n`, leaving `??` (none used) and literals alone. */
+export function toPgPlaceholders(sql: string): string {
+  let i = 0;
+  return sql.replace(/\?/g, () => "$" + ++i);
 }
 
-export function uid(prefix: string): string {
-  return prefix + "_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+// -------------------------------------------------------------------- public
+
+export async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  if (driver === "postgres") {
+    return (await pg().unsafe(toPgPlaceholders(sql), params)) as T[];
+  }
+  return sqlite()
+    .prepare(sql)
+    .all(...forSqlite(params)) as T[];
+}
+
+export async function one<T = Record<string, unknown>>(
+  sql: string,
+  params: unknown[] = [],
+): Promise<T | undefined> {
+  const rows = await q<T>(sql, params);
+  return rows[0];
+}
+
+export async function exec(sql: string, params: unknown[] = []): Promise<void> {
+  if (driver === "postgres") {
+    await pg().unsafe(toPgPlaceholders(sql), params);
+    return;
+  }
+  sqlite()
+    .prepare(sql)
+    .run(...forSqlite(params));
+}
+
+/** Postgres schema is applied by migration; SQLite builds itself on first use. */
+export async function ensureSchema(): Promise<void> {
+  if (driver === "sqlite") sqlite();
 }

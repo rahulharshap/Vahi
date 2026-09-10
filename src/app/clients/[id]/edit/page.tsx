@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function EditClient({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const c = getClient(id);
+  const c = await getClient(id);
   if (!c) notFound();
   const action = updateClientAction.bind(null, id);
 

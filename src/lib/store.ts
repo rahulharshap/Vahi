@@ -1,4 +1,4 @@
-import { all, get, run, uid } from "./db";
+import { q, one, exec, uid, nowISO } from "./db";
 import {
   generateOccurrences,
   iso,
@@ -35,14 +35,14 @@ export interface ClientRow {
   pan: string | null;
   gstin: string | null;
   gst_scheme: GstScheme;
-  tds_deductor: number;
-  has_employees: number;
-  tax_audit: number;
+  tds_deductor: boolean | number;
+  has_employees: boolean | number;
+  tax_audit: boolean | number;
   director_count: number;
   state: string;
   contact_name: string | null;
   contact_phone: string | null;
-  active: number;
+  active: boolean | number;
 }
 
 export interface FilingRow {
@@ -65,6 +65,12 @@ export interface FilingRow {
   notes: string | null;
 }
 
+type JoinedFilingRow = FilingRow & {
+  clientname: string;
+  contactname: string | null;
+  contactphone: string | null;
+};
+
 export interface FilingView extends FilingRow {
   clientName: string;
   contactName: string | null;
@@ -76,6 +82,7 @@ export interface FilingView extends FilingRow {
   docsReceivedList: string[];
   docsOutstanding: string[];
   exposure: number;
+  stagesSent: Stage[];
   lastChase: { stage: Stage; created_at: string } | null;
 }
 
@@ -90,13 +97,11 @@ export const RISK_LABEL: Record<Risk, string> = {
   NA: "Not applicable",
 };
 
-export const RISK_ORDER: Risk[] = ["OVERDUE", "CRITICAL", "AT_RISK", "ON_TRACK", "FILED", "NA"];
-
 // -------------------------------------------------------------- penalties
 
 /**
- * Rough rupee exposure if this filing is missed. Deliberately conservative and
- * clearly an estimate - it exists to rank work, not to advise a client.
+ * Rough rupee exposure if a filing is missed. Deliberately conservative and
+ * clearly an estimate — it ranks work, it does not advise a client.
  * [fixed floor, per-day, cap]
  */
 const PENALTY_MODEL: Record<string, [number, number, number]> = {
@@ -122,15 +127,11 @@ const PENALTY_MODEL: Record<string, [number, number, number]> = {
   PT_TS: [0, 25, 5000],
 };
 
-/** Exposure today: fixed component always counts once past due, per-day accrues. */
 export function estimateExposure(code: string, daysLate: number): number {
   const model = PENALTY_MODEL[code];
   if (!model) return 0;
   const [fixed, perDay, cap] = model;
-  if (daysLate <= 0) {
-    // not yet late - show the fixed floor as what is at stake
-    return Math.min(fixed || perDay * 30, cap);
-  }
+  if (daysLate <= 0) return Math.min(fixed || perDay * 30, cap);
   return Math.min(fixed + perDay * daysLate, cap);
 }
 
@@ -140,10 +141,19 @@ export function todayISO(): string {
   return iso(new Date());
 }
 
+export function addDays(dateISO: string, n: number): string {
+  const d = parseISO(dateISO);
+  d.setDate(d.getDate() + n);
+  return iso(d);
+}
+
 export function daysBetween(fromISO: string, toISO: string): number {
-  const a = parseISO(fromISO).getTime();
-  const b = parseISO(toISO).getTime();
-  return Math.round((b - a) / 86400000);
+  return Math.round((parseISO(toISO).getTime() - parseISO(fromISO).getTime()) / 86400000);
+}
+
+/** Postgres `date` and SQLite TEXT both arrive as strings; normalise the tail. */
+function dateOnly(v: string | null): string | null {
+  return v ? String(v).slice(0, 10) : null;
 }
 
 export function toProfile(c: ClientRow): ClientProfile {
@@ -171,7 +181,6 @@ export function riskOf(status: FilingStatus, daysLeft: number): Risk {
     if (daysLeft <= 10) return "AT_RISK";
     return "ON_TRACK";
   }
-  // documents are in, only preparation remains
   if (daysLeft <= 1) return "CRITICAL";
   if (daysLeft <= 3) return "AT_RISK";
   return "ON_TRACK";
@@ -179,26 +188,31 @@ export function riskOf(status: FilingStatus, daysLeft: number): Risk {
 
 // ------------------------------------------------------------------ firms
 
-export function ensureFirm(name = "Vahi Demo & Associates", city = "Hyderabad") {
-  const existing = get("SELECT id FROM firms WHERE id = ?", [FIRM_ID]);
+export async function ensureFirm(name = "Rao & Associates, Chartered Accountants", city = "Hyderabad") {
+  const existing = await one<{ id: string }>("SELECT id FROM firms WHERE id = ?", [FIRM_ID]);
   if (!existing) {
-    run("INSERT INTO firms (id, name, city) VALUES (?, ?, ?)", [FIRM_ID, name, city]);
+    await exec("INSERT INTO firms (id, name, city, created_at) VALUES (?, ?, ?, ?)", [
+      FIRM_ID,
+      name,
+      city,
+      nowISO(),
+    ]);
   }
-  return get<{ id: string; name: string; city: string }>("SELECT * FROM firms WHERE id = ?", [FIRM_ID])!;
+  return (await one<{ id: string; name: string; city: string }>("SELECT * FROM firms WHERE id = ?", [
+    FIRM_ID,
+  ]))!;
 }
 
-export function firm() {
-  return ensureFirm();
-}
+export const firm = ensureFirm;
 
 // ---------------------------------------------------------------- clients
 
-export function listClients(): ClientRow[] {
-  return all<ClientRow>("SELECT * FROM clients WHERE firm_id = ? ORDER BY name", [FIRM_ID]);
+export async function listClients(): Promise<ClientRow[]> {
+  return q<ClientRow>("SELECT * FROM clients WHERE firm_id = ? ORDER BY name", [FIRM_ID]);
 }
 
-export function getClient(id: string): ClientRow | undefined {
-  return get<ClientRow>("SELECT * FROM clients WHERE id = ?", [id]);
+export async function getClient(id: string): Promise<ClientRow | undefined> {
+  return one<ClientRow>("SELECT * FROM clients WHERE id = ?", [id]);
 }
 
 export interface ClientInput {
@@ -216,13 +230,13 @@ export interface ClientInput {
   contactPhone?: string | null;
 }
 
-export function createClient(input: ClientInput): string {
+export async function createClient(input: ClientInput): Promise<string> {
   const id = uid("cli");
-  run(
+  await exec(
     `INSERT INTO clients
       (id, firm_id, name, entity_type, pan, gstin, gst_scheme, tds_deductor,
-       has_employees, tax_audit, director_count, state, contact_name, contact_phone)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       has_employees, tax_audit, director_count, state, contact_name, contact_phone, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       id,
       FIRM_ID,
@@ -231,20 +245,21 @@ export function createClient(input: ClientInput): string {
       input.pan ?? null,
       input.gstin ?? null,
       input.gstScheme,
-      input.tdsDeductor ? 1 : 0,
-      input.hasEmployees ? 1 : 0,
-      input.taxAudit ? 1 : 0,
+      input.tdsDeductor,
+      input.hasEmployees,
+      input.taxAudit,
       input.directorCount,
       input.state,
       input.contactName ?? null,
       input.contactPhone ?? null,
+      nowISO(),
     ],
   );
   return id;
 }
 
-export function updateClient(id: string, input: ClientInput) {
-  run(
+export async function updateClient(id: string, input: ClientInput): Promise<void> {
+  await exec(
     `UPDATE clients SET name=?, entity_type=?, pan=?, gstin=?, gst_scheme=?,
        tds_deductor=?, has_employees=?, tax_audit=?, director_count=?, state=?,
        contact_name=?, contact_phone=? WHERE id=?`,
@@ -254,9 +269,9 @@ export function updateClient(id: string, input: ClientInput) {
       input.pan ?? null,
       input.gstin ?? null,
       input.gstScheme,
-      input.tdsDeductor ? 1 : 0,
-      input.hasEmployees ? 1 : 0,
-      input.taxAudit ? 1 : 0,
+      input.tdsDeductor,
+      input.hasEmployees,
+      input.taxAudit,
       input.directorCount,
       input.state,
       input.contactName ?? null,
@@ -266,33 +281,36 @@ export function updateClient(id: string, input: ClientInput) {
   );
 }
 
-export function deleteClient(id: string) {
-  run("DELETE FROM clients WHERE id = ?", [id]);
+export async function deleteClient(id: string): Promise<void> {
+  await exec("DELETE FROM clients WHERE id = ?", [id]);
 }
 
 // ---------------------------------------------------------------- filings
 
 /**
  * Expand the rules engine for one client into the filings table. Idempotent:
- * existing rows keep their status, docs and notes. Rows whose obligation no
- * longer applies are removed only when untouched.
+ * existing rows keep their status, documents and notes. Rows whose obligation
+ * no longer applies are removed only when untouched.
  */
-export function syncClientFilings(clientId: string, fromISO: string, toISO: string): number {
-  const client = getClient(clientId);
+export async function syncClientFilings(clientId: string, fromISO: string, toISO: string): Promise<number> {
+  const client = await getClient(clientId);
   if (!client) return 0;
   const occurrences = generateOccurrences(toProfile(client), fromISO, toISO);
+
+  const existing = await q<{ obligation_code: string; period_key: string }>(
+    "SELECT obligation_code, period_key FROM filings WHERE client_id = ?",
+    [clientId],
+  );
+  const have = new Set(existing.map((e) => e.obligation_code + "|" + e.period_key));
+
   let created = 0;
   for (const o of occurrences) {
-    const existing = get<{ id: string }>(
-      "SELECT id FROM filings WHERE client_id=? AND obligation_code=? AND period_key=?",
-      [clientId, o.obligationCode, o.periodKey],
-    );
-    if (existing) continue;
-    run(
+    if (have.has(o.obligationCode + "|" + o.periodKey)) continue;
+    await exec(
       `INSERT INTO filings
         (id, client_id, obligation_code, title, category, authority, period_key,
-         period_label, due_date, docs_required, penalty_note)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+         period_label, due_date, docs_required, penalty_note, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         uid("fil"),
         clientId,
@@ -305,43 +323,80 @@ export function syncClientFilings(clientId: string, fromISO: string, toISO: stri
         o.dueDate,
         JSON.stringify(o.docsRequired),
         o.penaltyNote,
+        nowISO(),
       ],
     );
     created++;
   }
+
   // drop untouched filings for obligations that no longer apply
   const validCodes = new Set(occurrences.map((o) => o.obligationCode));
-  const stale = all<{ id: string; obligation_code: string }>(
+  const stale = await q<{ id: string; obligation_code: string }>(
     `SELECT id, obligation_code FROM filings
       WHERE client_id=? AND status='AWAITING_DOCS' AND docs_received='[]'`,
     [clientId],
   );
   for (const s of stale) {
-    if (!validCodes.has(s.obligation_code)) run("DELETE FROM filings WHERE id=?", [s.id]);
+    if (!validCodes.has(s.obligation_code)) await exec("DELETE FROM filings WHERE id=?", [s.id]);
   }
   return created;
 }
 
-export function syncAllFilings(fromISO: string, toISO: string): number {
+export async function syncAllFilings(fromISO: string, toISO: string): Promise<number> {
   let n = 0;
-  for (const c of listClients()) n += syncClientFilings(c.id, fromISO, toISO);
+  for (const c of await listClients()) n += await syncClientFilings(c.id, fromISO, toISO);
   return n;
 }
 
-function hydrate(row: FilingRow & { clientName: string; contactName: string | null; contactPhone: string | null }): FilingView {
-  const effectiveDue = row.extended_due || row.due_date;
-  const daysLeft = daysBetween(todayISO(), effectiveDue);
+const FILING_SELECT = `
+  SELECT f.*, c.name AS clientname, c.contact_name AS contactname, c.contact_phone AS contactphone
+    FROM filings f JOIN clients c ON c.id = f.client_id
+   WHERE c.firm_id = ?`;
+
+/**
+ * Attach chase history to a page of filings in one query rather than one per
+ * row. Over a pooled network connection the N+1 version cost seconds.
+ */
+async function attachChases(rows: JoinedFilingRow[]): Promise<Map<string, { stages: Stage[]; last: { stage: Stage; created_at: string } | null }>> {
+  const map = new Map<string, { stages: Stage[]; last: { stage: Stage; created_at: string } | null }>();
+  if (rows.length === 0) return map;
+  const ids = rows.map((r) => r.id);
+  const placeholders = ids.map(() => "?").join(",");
+  const msgs = await q<{ filing_id: string; stage: Stage; created_at: string }>(
+    `SELECT filing_id, stage, created_at FROM messages
+      WHERE filing_id IN (${placeholders}) ORDER BY created_at ASC`,
+    ids,
+  );
+  for (const m of msgs) {
+    const entry = map.get(m.filing_id) ?? { stages: [], last: null };
+    entry.stages.push(m.stage);
+    entry.last = { stage: m.stage, created_at: String(m.created_at) };
+    map.set(m.filing_id, entry);
+  }
+  return map;
+}
+
+function hydrate(
+  row: JoinedFilingRow,
+  chases: Map<string, { stages: Stage[]; last: { stage: Stage; created_at: string } | null }>,
+  today: string,
+): FilingView {
+  const dueDate = dateOnly(row.due_date)!;
+  const extendedDue = dateOnly(row.extended_due);
+  const effectiveDue = extendedDue || dueDate;
+  const daysLeft = daysBetween(today, effectiveDue);
   const docsRequiredList: string[] = JSON.parse(row.docs_required || "[]");
   const docsReceivedList: string[] = JSON.parse(row.docs_received || "[]");
   const docsOutstanding = docsRequiredList.filter((d) => !docsReceivedList.includes(d));
   const risk = riskOf(row.status, daysLeft);
-  const lastChase =
-    get<{ stage: Stage; created_at: string }>(
-      "SELECT stage, created_at FROM messages WHERE filing_id=? ORDER BY created_at DESC LIMIT 1",
-      [row.id],
-    ) ?? null;
+  const chase = chases.get(row.id);
   return {
     ...row,
+    due_date: dueDate,
+    extended_due: extendedDue,
+    clientName: row.clientname,
+    contactName: row.contactname,
+    contactPhone: row.contactphone,
     effectiveDue,
     daysLeft,
     risk,
@@ -349,23 +404,21 @@ function hydrate(row: FilingRow & { clientName: string; contactName: string | nu
     docsReceivedList,
     docsOutstanding,
     exposure: risk === "FILED" || risk === "NA" ? 0 : estimateExposure(row.obligation_code, -daysLeft),
-    lastChase,
+    stagesSent: chase?.stages ?? [],
+    lastChase: chase?.last ?? null,
   };
 }
 
-const FILING_SELECT = `
-  SELECT f.*, c.name AS clientName, c.contact_name AS contactName, c.contact_phone AS contactPhone
-    FROM filings f JOIN clients c ON c.id = f.client_id
-   WHERE c.firm_id = ?`;
-
-export function listFilings(opts: {
-  clientId?: string;
-  from?: string;
-  to?: string;
-  status?: FilingStatus;
-  category?: Category;
-  limit?: number;
-} = {}): FilingView[] {
+export async function listFilings(
+  opts: {
+    clientId?: string;
+    from?: string;
+    to?: string;
+    status?: FilingStatus;
+    category?: Category;
+    limit?: number;
+  } = {},
+): Promise<FilingView[]> {
   const where: string[] = [];
   const params: unknown[] = [FIRM_ID];
   if (opts.clientId) {
@@ -393,30 +446,29 @@ export function listFilings(opts: {
     (where.length ? " AND " + where.join(" AND ") : "") +
     " ORDER BY COALESCE(f.extended_due, f.due_date) ASC" +
     (opts.limit ? " LIMIT " + Number(opts.limit) : "");
-  return all<FilingRow & { clientName: string; contactName: string | null; contactPhone: string | null }>(
-    sql,
-    params,
-  ).map(hydrate);
+  const rows = await q<JoinedFilingRow>(sql, params);
+  const chases = await attachChases(rows);
+  const today = todayISO();
+  return rows.map((r) => hydrate(r, chases, today));
 }
 
-export function getFiling(id: string): FilingView | undefined {
-  const row = get<FilingRow & { clientName: string; contactName: string | null; contactPhone: string | null }>(
-    FILING_SELECT + " AND f.id = ?",
-    [FIRM_ID, id],
-  );
-  return row ? hydrate(row) : undefined;
+export async function getFiling(id: string): Promise<FilingView | undefined> {
+  const row = await one<JoinedFilingRow>(FILING_SELECT + " AND f.id = ?", [FIRM_ID, id]);
+  if (!row) return undefined;
+  const chases = await attachChases([row]);
+  return hydrate(row, chases, todayISO());
 }
 
-export function setFilingStatus(id: string, status: FilingStatus) {
-  run("UPDATE filings SET status=?, filed_at=CASE WHEN ?='FILED' THEN datetime('now') ELSE NULL END WHERE id=?", [
+export async function setFilingStatus(id: string, status: FilingStatus): Promise<void> {
+  await exec("UPDATE filings SET status=?, filed_at=? WHERE id=?", [
     status,
-    status,
+    status === "FILED" ? nowISO() : null,
     id,
   ]);
 }
 
-export function toggleDocReceived(filingId: string, doc: string) {
-  const row = get<{ docs_received: string; docs_required: string }>(
+export async function toggleDocReceived(filingId: string, doc: string): Promise<void> {
+  const row = await one<{ docs_received: string; docs_required: string }>(
     "SELECT docs_received, docs_required FROM filings WHERE id=?",
     [filingId],
   );
@@ -424,82 +476,85 @@ export function toggleDocReceived(filingId: string, doc: string) {
   const received: string[] = JSON.parse(row.docs_received || "[]");
   const required: string[] = JSON.parse(row.docs_required || "[]");
   const next = received.includes(doc) ? received.filter((d) => d !== doc) : [...received, doc];
-  const allIn = required.every((d) => next.includes(d));
-  run("UPDATE filings SET docs_received=?, status=CASE WHEN status IN ('AWAITING_DOCS','DOCS_RECEIVED') THEN ? ELSE status END WHERE id=?", [
-    JSON.stringify(next),
-    allIn && next.length > 0 ? "DOCS_RECEIVED" : "AWAITING_DOCS",
-    filingId,
-  ]);
+  const allIn = required.length > 0 && required.every((d) => next.includes(d));
+  await exec(
+    `UPDATE filings SET docs_received=?,
+       status = CASE WHEN status IN ('AWAITING_DOCS','DOCS_RECEIVED') THEN ? ELSE status END
+     WHERE id=?`,
+    [JSON.stringify(next), allIn ? "DOCS_RECEIVED" : "AWAITING_DOCS", filingId],
+  );
 }
 
-export function setExtendedDue(filingId: string, date: string | null) {
-  run("UPDATE filings SET extended_due=? WHERE id=?", [date, filingId]);
+export async function setExtendedDue(filingId: string, date: string | null): Promise<void> {
+  await exec("UPDATE filings SET extended_due=? WHERE id=?", [date, filingId]);
 }
 
 // ----------------------------------------------------------------- chases
 
-/** Which chase stage is due for this filing right now, if any. */
+/** How far back an overdue filing still gets auto-chased. Older than this is a
+ *  conversation for a partner to have, not a template message. */
+export const CHASE_LOOKBACK_DAYS = 45;
+
+/** Which chase stage is due for this filing right now, if any. Pure. */
 export function dueStage(f: FilingView): Stage | null {
   if (f.status === "FILED" || f.status === "NOT_APPLICABLE") return null;
   if (f.docsOutstanding.length === 0) return null;
   const order: Stage[] = ["T10", "T5", "T2", "T1", "OVERDUE"];
   let candidate: Stage | null = null;
   for (const s of order) {
-    const offset = STAGE_OFFSET[s];
     if (s === "OVERDUE") {
       if (f.daysLeft < 0) candidate = s;
-    } else if (f.daysLeft <= offset) {
+    } else if (f.daysLeft <= STAGE_OFFSET[s]) {
       candidate = s;
     }
   }
   if (!candidate) return null;
-  const alreadySent = get<{ n: number }>("SELECT COUNT(*) AS n FROM messages WHERE filing_id=? AND stage=?", [
-    f.id,
-    candidate,
-  ]);
-  if (alreadySent && alreadySent.n > 0) return null;
-  return candidate;
+  return f.stagesSent.includes(candidate) ? null : candidate;
 }
 
-/** How far back an overdue filing still gets auto-chased. Older than this is a
- *  conversation for a partner to have, not a template message. */
-export const CHASE_LOOKBACK_DAYS = 45;
-
-export function pendingChases(): Array<{ filing: FilingView; stage: Stage }> {
-  const out: Array<{ filing: FilingView; stage: Stage }> = [];
+export async function pendingChases(): Promise<Array<{ filing: FilingView; stage: Stage }>> {
   const today = todayISO();
-  for (const f of listFilings({ from: addDays(today, -CHASE_LOOKBACK_DAYS), to: addDays(today, 12) })) {
+  const rows = await listFilings({ from: addDays(today, -CHASE_LOOKBACK_DAYS), to: addDays(today, 12) });
+  const out: Array<{ filing: FilingView; stage: Stage }> = [];
+  for (const f of rows) {
     const stage = dueStage(f);
     if (stage) out.push({ filing: f, stage });
   }
   return out.sort((a, b) => a.filing.effectiveDue.localeCompare(b.filing.effectiveDue));
 }
 
-export function recordMessage(filingId: string, clientId: string, stage: Stage, body: string, status: string) {
-  run(
-    "INSERT INTO messages (id, filing_id, client_id, stage, body, status, sent_at) VALUES (?,?,?,?,?,?,datetime('now'))",
-    [uid("msg"), filingId, clientId, stage, body, status],
+export async function recordMessage(
+  filingId: string,
+  clientId: string,
+  stage: Stage,
+  body: string,
+  status: string,
+): Promise<void> {
+  const ts = nowISO();
+  await exec(
+    "INSERT INTO messages (id, filing_id, client_id, stage, body, status, sent_at, created_at) VALUES (?,?,?,?,?,?,?,?)",
+    [uid("msg"), filingId, clientId, stage, body, status, ts, ts],
   );
 }
 
-export function listMessages(filingId: string) {
-  return all<{ id: string; stage: Stage; body: string; status: string; sent_at: string }>(
+export async function listMessages(filingId: string) {
+  return q<{ id: string; stage: Stage; body: string; status: string; sent_at: string }>(
     "SELECT id, stage, body, status, sent_at FROM messages WHERE filing_id=? ORDER BY created_at DESC",
     [filingId],
   );
 }
 
-export function recentMessages(limit = 40) {
-  return all<{
+export async function recentMessages(limit = 40) {
+  return q<{
     id: string;
     stage: Stage;
     body: string;
     status: string;
     sent_at: string;
-    clientName: string;
+    clientname: string;
     title: string;
   }>(
-    `SELECT m.id, m.stage, m.body, m.status, m.sent_at, c.name AS clientName, f.title
+    `SELECT m.id, m.stage, m.body, m.status, m.sent_at, c.name AS clientname, f.title
        FROM messages m
        JOIN clients c ON c.id = m.client_id
        JOIN filings f ON f.id = m.filing_id
@@ -510,12 +565,6 @@ export function recentMessages(limit = 40) {
 }
 
 // -------------------------------------------------------------- dashboard
-
-export function addDays(dateISO: string, n: number): string {
-  const d = parseISO(dateISO);
-  d.setDate(d.getDate() + n);
-  return iso(d);
-}
 
 export interface Dashboard {
   today: string;
@@ -528,10 +577,10 @@ export interface Dashboard {
   byCategory: Array<{ category: Category; open: number; overdue: number }>;
 }
 
-export function dashboard(): Dashboard {
+export async function dashboard(): Promise<Dashboard> {
   const today = todayISO();
-  const horizon = addDays(today, 45);
-  const rows = listFilings({ from: addDays(today, -400), to: horizon });
+  const rows = await listFilings({ from: addDays(today, -400), to: addDays(today, 45) });
+
   const buckets: Record<Risk, FilingView[]> = {
     OVERDUE: [],
     CRITICAL: [],
@@ -553,21 +602,32 @@ export function dashboard(): Dashboard {
     cats.set(r.category, c);
   }
 
+  // chases are computable from the rows already loaded, no second round trip
+  const lookback = addDays(today, -CHASE_LOOKBACK_DAYS);
+  const horizon = addDays(today, 12);
+  const chasesDue = rows.filter(
+    (f) => f.effectiveDue >= lookback && f.effectiveDue <= horizon && dueStage(f) !== null,
+  ).length;
+
   const monthStart = today.slice(0, 7) + "-01";
-  const filedThisMonth = get<{ n: number }>(
+  const filedRow = await one<{ n: number | string }>(
     `SELECT COUNT(*) AS n FROM filings f JOIN clients c ON c.id=f.client_id
       WHERE c.firm_id=? AND f.status='FILED' AND f.filed_at >= ?`,
     [FIRM_ID, monthStart],
   );
+  const clientRow = await one<{ n: number | string }>(
+    "SELECT COUNT(*) AS n FROM clients WHERE firm_id = ?",
+    [FIRM_ID],
+  );
 
   return {
     today,
-    clientCount: listClients().length,
+    clientCount: Number(clientRow?.n ?? 0),
     buckets,
     exposure,
     next30: rows.filter((r) => r.daysLeft >= 0 && r.daysLeft <= 30 && r.risk !== "FILED" && r.risk !== "NA"),
-    chasesDue: pendingChases().length,
-    filedThisMonth: filedThisMonth?.n ?? 0,
+    chasesDue,
+    filedThisMonth: Number(filedRow?.n ?? 0),
     byCategory: [...cats.entries()].map(([category, v]) => ({ category, ...v })).sort((a, b) => b.open - a.open),
   };
 }

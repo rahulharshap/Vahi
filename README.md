@@ -36,10 +36,44 @@ completion.
 ## Stack
 
 - **Next.js 15** (App Router, server actions — no client-side data layer)
-- **SQLite via `node:sqlite`** — Node's built-in driver, so no native build and
-  no external service. The schema in `src/lib/db.ts` is deliberately
-  Postgres-shaped; moving to Supabase is a dialect change, not a redesign.
+- **Dual-driver storage.** `DATABASE_URL` set → Postgres (Supabase).
+  Unset → SQLite via Node's built-in `node:sqlite`, so local dev needs no
+  external service and no native build. Both paths speak the same SQL subset:
+  `?` placeholders rewritten to `$n`, timestamps generated in JS, booleans
+  coerced for SQLite.
 - **Tailwind v4** with CSS-variable tokens, light and dark.
+
+## Deploying to Supabase + Vercel
+
+1. Apply the migrations — either paste `supabase/migrations/*.sql` into the
+   Supabase SQL editor in order, or:
+
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref <ref>
+   npx supabase db push
+   ```
+
+2. Set these in Vercel's environment (and in `.env.local` to test locally):
+
+   | Variable | Value |
+   | --- | --- |
+   | `DATABASE_URL` | Supabase **pooled** connection string, port 6543 |
+   | `SEED_TOKEN` | Any long random string, if you want demo data |
+
+   `DATABASE_URL` is the only one the app needs — it does not use the
+   anon/publishable key, because every query is server-side.
+
+3. Seed the demo roster once (optional):
+
+   ```bash
+   curl -X POST https://<app>.vercel.app/api/seed -H "x-seed-token: <SEED_TOKEN>"
+   ```
+
+`0002_rls.sql` enables row-level security with no policies and revokes the
+`anon` and `authenticated` roles. The app connects as the owner and bypasses
+RLS, so nothing breaks — but the public key that ships to browsers can read
+nothing. That is the correct posture until Supabase Auth is wired up.
 
 ## Layout
 
@@ -58,8 +92,10 @@ completion.
   Gupshup) needs an account and template approval, so the adapter is a seam
   rather than a fake HTTP call. Budget 1–2 weeks for template approval.
 - **Auth and multi-tenancy.** Every query is scoped by `FIRM_ID`, currently a
-  constant. Swapping in real auth means threading the session's firm id through
-  `store.ts` — one parameter, not a rewrite.
+  constant, and there is no login. Anyone with the deployed URL sees
+  everything. Fine for demo data; not fine for a real firm's client list.
+  Wiring Supabase Auth means threading the session's firm id through
+  `store.ts` and adding per-firm policies to `0002_rls.sql`.
 - **GST portal integration.** Out of scope for v1 on purpose.
 
 ## Caveats worth knowing

@@ -53,58 +53,58 @@ const WINDOW_FWD = 200;
 export async function createClientAction(fd: FormData) {
   const input = parseClient(fd);
   if (!input.name) throw new Error("Client name is required");
-  const id = createClient(input);
+  const id = await createClient(input);
   const today = todayISO();
-  syncClientFilings(id, addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
+  await syncClientFilings(id, addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
   refresh();
   redirect("/clients/" + id);
 }
 
 export async function updateClientAction(id: string, fd: FormData) {
-  updateClient(id, parseClient(fd));
+  await updateClient(id, parseClient(fd));
   const today = todayISO();
-  syncClientFilings(id, addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
+  await syncClientFilings(id, addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
   refresh();
   redirect("/clients/" + id);
 }
 
 export async function deleteClientAction(id: string) {
-  deleteClient(id);
+  await deleteClient(id);
   refresh();
   redirect("/clients");
 }
 
 export async function setStatusAction(filingId: string, status: FilingStatus) {
-  setFilingStatus(filingId, status);
+  await setFilingStatus(filingId, status);
   refresh();
 }
 
 export async function toggleDocAction(filingId: string, doc: string) {
-  toggleDocReceived(filingId, doc);
+  await toggleDocReceived(filingId, doc);
   refresh();
 }
 
 export async function setExtendedDueAction(filingId: string, fd: FormData) {
   const raw = String(fd.get("extendedDue") ?? "").trim();
-  setExtendedDue(filingId, raw || null);
+  await setExtendedDue(filingId, raw || null);
   refresh();
 }
 
 export async function resyncAction() {
   const today = todayISO();
-  syncAllFilings(addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
+  await syncAllFilings(addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
   refresh();
 }
 
 export async function reseedAction() {
-  reseed();
+  await reseed();
   refresh();
   redirect("/");
 }
 
 /** Send one chase. Returns nothing; the row disappears from the queue. */
 export async function sendChaseAction(filingId: string, stage: Stage) {
-  const f = getFiling(filingId);
+  const f = await getFiling(filingId);
   if (!f) return;
   const body = composeChase(stage, {
     clientName: f.clientName,
@@ -113,7 +113,7 @@ export async function sendChaseAction(filingId: string, stage: Stage) {
     periodLabel: f.period_label,
     dueDate: f.effectiveDue,
     docsOutstanding: f.docsOutstanding,
-    firmName: firm().name,
+    firmName: (await firm()).name,
     penaltyNote: f.penalty_note,
   });
   let status = "SENT";
@@ -123,20 +123,20 @@ export async function sendChaseAction(filingId: string, stage: Stage) {
   } catch {
     status = "FAILED";
   }
-  recordMessage(f.id, f.client_id, stage, body, status);
+  await recordMessage(f.id, f.client_id, stage, body, status);
   refresh();
 }
 
 /** Send every chase currently due. This is the button that replaces a morning. */
 export async function sendAllChasesAction() {
-  for (const { filing, stage } of pendingChases()) {
+  for (const { filing, stage } of await pendingChases()) {
     await sendChaseAction(filing.id, stage);
   }
   refresh();
 }
 
 export async function previewChase(filingId: string): Promise<string | null> {
-  const f = getFiling(filingId);
+  const f = await getFiling(filingId);
   if (!f) return null;
   const stage = dueStage(f) ?? "T10";
   return composeChase(stage, {
@@ -146,14 +146,14 @@ export async function previewChase(filingId: string): Promise<string | null> {
     periodLabel: f.period_label,
     dueDate: f.effectiveDue,
     docsOutstanding: f.docsOutstanding,
-    firmName: firm().name,
+    firmName: (await firm()).name,
     penaltyNote: f.penalty_note,
   });
 }
 
 export async function markAllFiledForClient(clientId: string) {
-  for (const f of listFilings({ clientId })) {
-    if (f.daysLeft < 0 && f.status !== "FILED") setFilingStatus(f.id, "FILED");
+  for (const f of await listFilings({ clientId })) {
+    if (f.daysLeft < 0 && f.status !== "FILED") await setFilingStatus(f.id, "FILED");
   }
   refresh();
 }

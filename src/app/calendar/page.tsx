@@ -31,7 +31,7 @@ export default async function Calendar({
   const openOnly = sp.open !== "0";
 
   const today = todayISO();
-  let rows = listFilings({
+  let rows = await listFilings({
     from: addDays(today, -60),
     to: addDays(today, range.days),
     category: cat === "ALL" ? undefined : cat,
