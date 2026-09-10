@@ -2,6 +2,7 @@ import Link from "next/link";
 import { firm, pendingChases, recentMessages } from "@/lib/store";
 import { composeChase, STAGE_LABEL, type Stage } from "@/lib/whatsapp";
 import { Empty, SectionHead, prettyDate } from "@/components/ui";
+import SearchBox from "@/components/SearchBox";
 import { sendAllChasesAction, sendChaseAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +15,27 @@ const STAGE_TONE: Record<Stage, string> = {
   OVERDUE: "var(--danger)",
 };
 
-export default async function Chases() {
-  const queue = await pendingChases();
+const PAGE = 20;
+
+export default async function Chases({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; all?: string }>;
+}) {
+  const sp = await searchParams;
+  const term = sp.q?.trim().toLowerCase();
+  const allQueued = await pendingChases();
+  const matched = term
+    ? allQueued.filter(
+        ({ filing }) =>
+          filing.clientName.toLowerCase().includes(term) || filing.title.toLowerCase().includes(term),
+      )
+    : allQueued;
+  // Each card carries a full message body; rendering hundreds up front is a
+  // lot of markup for work that gets done a few at a time.
+  const showAll = sp.all === "1";
+  const queue = showAll ? matched : matched.slice(0, PAGE);
+  const hidden = matched.length - queue.length;
   const history = await recentMessages(25);
   const f = await firm();
 
@@ -31,14 +51,16 @@ export default async function Chases() {
             team does not have to.
           </p>
         </div>
-        {queue.length ? (
+        {allQueued.length ? (
           <form action={sendAllChasesAction} className="ml-auto">
             <button className="btn btn-primary" type="submit">
-              Send all {queue.length}
+              Send all {allQueued.length}
             </button>
           </form>
         ) : null}
       </header>
+
+      <SearchBox placeholder="Search client or filing" />
 
       {!process.env.WA_PROVIDER ? (
         <div
@@ -52,7 +74,7 @@ export default async function Chases() {
       ) : null}
 
       <section>
-        <SectionHead title="Queued now" count={queue.length} />
+        <SectionHead title={term ? "Matching “" + sp.q + "”" : "Queued now"} count={matched.length} />
         {queue.length ? (
           <div className="space-y-3">
             {queue.map(({ filing, stage }) => {
@@ -107,10 +129,24 @@ export default async function Chases() {
           </div>
         ) : (
           <Empty
-            title="Nothing to chase"
-            hint="Every client with a deadline inside the next 10 days has already been messaged at the right stage."
+            title={term ? "No queued chase matches “" + sp.q + "”" : "Nothing to chase"}
+            hint={
+              term
+                ? "Try part of the client name or the filing."
+                : "Every client with a deadline inside the next 10 days has already been messaged at the right stage."
+            }
           />
         )}
+        {hidden > 0 ? (
+          <div className="mt-3 text-center">
+            <Link
+              href={"/chases?all=1" + (sp.q ? "&q=" + encodeURIComponent(sp.q) : "")}
+              className="btn"
+            >
+              Show {hidden} more
+            </Link>
+          </div>
+        ) : null}
       </section>
 
       <section>

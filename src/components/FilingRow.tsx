@@ -29,6 +29,11 @@ export default function FilingRow({
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <CategoryTag category={f.category} />
               <DocProgress f={f} />
+              {f.assignee ? (
+                <span className="pill" style={{ background: "var(--surface-3)", color: "var(--text-2)" }}>
+                  {f.assignee}
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>

@@ -226,8 +226,20 @@ export async function firmSafe(): Promise<{ id: string; name: string; city: stri
 
 // ---------------------------------------------------------------- clients
 
-export async function listClients(): Promise<ClientRow[]> {
-  return q<ClientRow>("SELECT * FROM clients WHERE firm_id = ? ORDER BY name", [FIRM_ID]);
+export async function listClients(search?: string): Promise<ClientRow[]> {
+  const term = search?.trim();
+  if (!term) {
+    return q<ClientRow>("SELECT * FROM clients WHERE firm_id = ? ORDER BY name", [FIRM_ID]);
+  }
+  const like = "%" + term.toLowerCase() + "%";
+  return q<ClientRow>(
+    `SELECT * FROM clients
+      WHERE firm_id = ?
+        AND (LOWER(name) LIKE ? OR LOWER(COALESCE(pan,'')) LIKE ?
+             OR LOWER(COALESCE(gstin,'')) LIKE ? OR LOWER(COALESCE(contact_name,'')) LIKE ?)
+      ORDER BY name`,
+    [FIRM_ID, like, like, like, like],
+  );
 }
 
 export async function getClient(id: string): Promise<ClientRow | undefined> {
@@ -424,6 +436,10 @@ export async function listFilings(
     category?: Category;
     /** exclude FILED and NOT_APPLICABLE in SQL rather than in JS */
     openOnly?: boolean;
+    /** free text over client name, filing title and period label */
+    search?: string;
+    /** staff member the filing is assigned to; "" matches unassigned */
+    assignee?: string;
     limit?: number;
   } = {},
 ): Promise<FilingView[]> {
@@ -451,6 +467,20 @@ export async function listFilings(
   }
   if (opts.openOnly) {
     where.push("f.status NOT IN ('FILED','NOT_APPLICABLE')");
+  }
+  if (opts.assignee !== undefined) {
+    if (opts.assignee === "") where.push("(f.assignee IS NULL OR f.assignee = '')");
+    else {
+      where.push("f.assignee = ?");
+      params.push(opts.assignee);
+    }
+  }
+  const term = opts.search?.trim();
+  if (term) {
+    // LOWER() rather than ILIKE so the same SQL runs on SQLite
+    where.push("(LOWER(c.name) LIKE ? OR LOWER(f.title) LIKE ? OR LOWER(f.period_label) LIKE ?)");
+    const like = "%" + term.toLowerCase() + "%";
+    params.push(like, like, like);
   }
   const sql =
     FILING_SELECT +
@@ -662,8 +692,8 @@ export interface ClientSummary {
  * client. The N+1 version issued 52 round trips and took four seconds against
  * Supabase.
  */
-export async function clientSummaries(): Promise<ClientSummary[]> {
-  const clients = await listClients();
+export async function clientSummaries(search?: string): Promise<ClientSummary[]> {
+  const clients = await listClients(search);
   if (clients.length === 0) return [];
   const today = todayISO();
 
@@ -741,4 +771,63 @@ export async function bulkUpdateFilings(
     n += chunk.length;
   }
   return n;
+}
+
+// ------------------------------------------------------------------- staff
+
+/**
+ * Ownership. A firm with eight staff needs to know who is preparing what —
+ * without it the board says a filing is late but not whose desk it is on.
+ * Assignees are free text rather than a users table: there is no auth yet,
+ * and inventing an accounts system before there is a login would be building
+ * the second half of a bridge.
+ */
+export async function setAssignee(filingId: string, assignee: string | null): Promise<void> {
+  await exec("UPDATE filings SET assignee=? WHERE id=?", [assignee?.trim() || null, filingId]);
+}
+
+export async function setNotes(filingId: string, notes: string | null): Promise<void> {
+  await exec("UPDATE filings SET notes=? WHERE id=?", [notes?.trim() || null, filingId]);
+}
+
+/** Everyone who currently has work, with their open and overdue counts. */
+export async function workload(): Promise<
+  Array<{ assignee: string | null; open: number; overdue: number; exposure: number }>
+> {
+  const today = todayISO();
+  const rows = await q<{ assignee: string | null; obligation_code: string; status: FilingStatus; effective_due: string }>(
+    `SELECT f.assignee, f.obligation_code, f.status,
+            COALESCE(f.extended_due, f.due_date) AS effective_due
+       FROM filings f JOIN clients c ON c.id = f.client_id
+      WHERE c.firm_id = ?
+        AND f.status NOT IN ('FILED','NOT_APPLICABLE')
+        AND COALESCE(f.extended_due, f.due_date) >= ?
+        AND COALESCE(f.extended_due, f.due_date) <= ?`,
+    [FIRM_ID, addDays(today, -BOARD_LOOKBACK_DAYS), addDays(today, 45)],
+  );
+  const map = new Map<string, { assignee: string | null; open: number; overdue: number; exposure: number }>();
+  for (const r of rows) {
+    const key = r.assignee ?? "";
+    const entry = map.get(key) ?? { assignee: r.assignee ?? null, open: 0, overdue: 0, exposure: 0 };
+    const daysLeft = daysBetween(today, String(r.effective_due).slice(0, 10));
+    entry.open++;
+    if (daysLeft < 0) entry.overdue++;
+    entry.exposure += estimateExposure(r.obligation_code, -daysLeft);
+    map.set(key, entry);
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.assignee === null) return 1;
+    if (b.assignee === null) return -1;
+    return b.overdue - a.overdue || b.open - a.open;
+  });
+}
+
+/** Distinct assignee names, for the picker. */
+export async function assignees(): Promise<string[]> {
+  const rows = await q<{ assignee: string }>(
+    `SELECT DISTINCT f.assignee FROM filings f JOIN clients c ON c.id = f.client_id
+      WHERE c.firm_id = ? AND f.assignee IS NOT NULL AND f.assignee <> '' ORDER BY f.assignee`,
+    [FIRM_ID],
+  );
+  return rows.map((r) => r.assignee);
 }

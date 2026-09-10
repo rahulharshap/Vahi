@@ -2,11 +2,13 @@ import Link from "next/link";
 import { clientSummaries } from "@/lib/store";
 import { ENTITY_LABEL } from "@/lib/compliance";
 import { Empty, RiskPill, prettyDate, rupees } from "@/components/ui";
+import SearchBox from "@/components/SearchBox";
 
 export const dynamic = "force-dynamic";
 
-export default async function Clients() {
-  const rows = await clientSummaries();
+export default async function Clients({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+  const { q } = await searchParams;
+  const rows = await clientSummaries(q);
 
   return (
     <div className="space-y-5">
@@ -14,16 +16,19 @@ export default async function Clients() {
         <div>
           <h1 className="text-[22px] font-bold leading-tight tracking-tight text-ink md:text-[26px]">Clients</h1>
           <p className="mt-0.5 text-[13px] text-ink-3">
-            {rows.length} on the roster · sorted by who needs attention
+            {q ? rows.length + " matching “" + q + "”" : rows.length + " on the roster · sorted by who needs attention"}
           </p>
         </div>
-        <Link href="/clients/new" className="btn btn-primary ml-auto">
-          Add client
-        </Link>
+        <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
+          <SearchBox placeholder="Search name, PAN, GSTIN" />
+          <Link href="/clients/new" className="btn btn-primary shrink-0">
+            Add client
+          </Link>
+        </div>
       </header>
 
       {rows.length === 0 ? (
-        <Empty title="No clients yet" hint="Add your first client and the compliance calendar builds itself." />
+        q ? <Empty title={"No client matches “" + q + "”"} hint="Try part of the name, PAN or GSTIN." /> : <Empty title="No clients yet" hint="Add your first client and the compliance calendar builds itself." />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {rows.map(({ client: c, open, overdue, exposure, worst, next }) => (

@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import Nav from "@/components/Nav";
+import { Sidebar, TopBar, BottomTabs } from "@/components/Nav";
 import DemoBanner from "@/components/DemoBanner";
 import { firmSafe } from "@/lib/store";
 import { driver } from "@/lib/db";
@@ -35,9 +35,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en">
       <body>
-        <Nav firmName={f.name} city={f.city} />
-        {demo ? <DemoBanner /> : null}
-        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-4 md:px-6 md:pb-12">{children}</main>
+        <div className="flex min-h-dvh">
+          <Sidebar firmName={f.name} city={f.city} />
+          <div className="min-w-0 flex-1">
+            <TopBar firmName={f.name} city={f.city} />
+            {demo ? <DemoBanner /> : null}
+            <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-4 md:px-6 lg:pb-12 lg:pt-6">{children}</main>
+          </div>
+        </div>
+        <BottomTabs />
       </body>
     </html>
   );

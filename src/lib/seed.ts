@@ -46,6 +46,13 @@ const CLIENTS: ClientInput[] = [
   { name: "Warangal Cotton Mills", entityType: "PARTNERSHIP", pan: "ABJFW3456D", gstin: "36ABJFW3456D1ZC", gstScheme: "MONTHLY", tdsDeductor: true, hasEmployees: true, taxAudit: true, directorCount: 0, state: "Telangana", contactName: "Srinivas Goud", contactPhone: "+919948667788" },
 ];
 
+/**
+ * Staff of a mid-size practice. Work is distributed by client rather than at
+ * random, because that is how firms actually allocate — one person owns a
+ * client's whole compliance calendar.
+ */
+const STAFF = ["Sunitha", "Kiran", "Aparna", "Ramesh"];
+
 /** Deterministic pseudo-random so the demo looks the same on every reset. */
 function rng(seed: number) {
   let s = seed;
@@ -76,6 +83,13 @@ export async function reseed(): Promise<boolean> {
   // in varying stages, a handful chronically stuck.
   const rand = rng(20260910);
   const rows = await listFilings({});
+
+  // one owner per client, and two clients deliberately left unowned so the
+  // board shows what falling through the cracks looks like
+  const owners = new Map<string, string | null>();
+  const clientIds = [...new Set(rows.map((r) => r.client_id))].sort();
+  clientIds.forEach((id, i) => owners.set(id, i % 11 === 3 ? null : STAFF[i % STAFF.length]));
+
   const updates: Array<{ id: string; status: any; docsReceived: string; filedAt: string | null }> = [];
 
   for (const f of rows) {
@@ -96,6 +110,10 @@ export async function reseed(): Promise<boolean> {
     }
   }
   await bulkUpdateFilings(updates);
+
+  // assign only work that is still open; filed history needs no owner
+  const openRows = rows.filter((f) => !updates.some((u) => u.id === f.id && u.status === "FILED"));
+  await bulkAssign(openRows.map((f) => ({ id: f.id, assignee: owners.get(f.client_id) ?? null })));
 
   // A few historical chases so the activity feed is not empty on first load.
   const chaseable = (await listFilings({ from: addDays(today, -20), to: addDays(today, 15) })).filter(
@@ -134,4 +152,24 @@ export async function reseed(): Promise<boolean> {
 function partial(required: string[], rand: () => number): string {
   if (required.length < 2) return "[]";
   return JSON.stringify(required.filter(() => rand() < 0.5));
+}
+
+/** Chunked assignment, same reasoning as bulkUpdateFilings. */
+async function bulkAssign(rows: Array<{ id: string; assignee: string | null }>, chunkSize = 200) {
+  const named = rows.filter((r) => r.assignee);
+  const byName = new Map<string, string[]>();
+  for (const r of named) {
+    const list = byName.get(r.assignee!) ?? [];
+    list.push(r.id);
+    byName.set(r.assignee!, list);
+  }
+  for (const [assignee, ids] of byName) {
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize);
+      await exec(
+        "UPDATE filings SET assignee=? WHERE id IN (" + chunk.map(() => "?").join(",") + ")",
+        [assignee, ...chunk],
+      );
+    }
+  }
 }

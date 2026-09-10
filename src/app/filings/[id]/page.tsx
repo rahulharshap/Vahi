@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { dueStage, firm, getFiling, listMessages, STATUS_LABEL, type FilingStatus } from "@/lib/store";
+import { assignees, dueStage, firm, getFiling, listMessages, STATUS_LABEL, type FilingStatus } from "@/lib/store";
 import { composeChase, STAGE_LABEL } from "@/lib/whatsapp";
 import { CATEGORY_LABEL } from "@/lib/compliance";
 import { CategoryTag, DueLabel, Empty, RiskPill, SectionHead, StatusPill, prettyDate, rupees } from "@/components/ui";
-import { sendChaseAction, setExtendedDueAction, setStatusAction, toggleDocAction } from "@/app/actions";
+import { sendChaseAction, setAssigneeAction, setExtendedDueAction, setNotesAction, setStatusAction, toggleDocAction } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,9 @@ export default async function FilingDetail({ params }: { params: Promise<{ id: s
   const messages = await listMessages(id);
   const stage = dueStage(f);
   const extend = setExtendedDueAction.bind(null, id);
+  const assign = setAssigneeAction.bind(null, id);
+  const note = setNotesAction.bind(null, id);
+  const team = await assignees();
 
   const preview = f.docsOutstanding.length
     ? composeChase(stage ?? "T10", {
@@ -181,6 +184,48 @@ export default async function FilingDetail({ params }: { params: Promise<{ id: s
             {f.filed_at ? (
               <p className="mt-3 text-[11.5px] text-ink-3">Filed {prettyDate(f.filed_at)}</p>
             ) : null}
+          </section>
+
+          <section className="card p-4">
+            <SectionHead title="Owner" />
+            <form action={assign} className="flex gap-2">
+              <input
+                name="assignee"
+                defaultValue={f.assignee ?? ""}
+                list="vahi-team"
+                placeholder="Unassigned"
+                aria-label="Assign to"
+                className="field"
+              />
+              <button className="btn" type="submit">
+                Save
+              </button>
+            </form>
+            <datalist id="vahi-team">
+              {team.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
+            <p className="mt-2 text-[11px] leading-snug text-ink-3">
+              Who is preparing this. Type a new name to add someone.
+            </p>
+          </section>
+
+          <section className="card p-4">
+            <SectionHead title="Notes" />
+            <form action={note} className="space-y-2">
+              <textarea
+                name="notes"
+                defaultValue={f.notes ?? ""}
+                rows={4}
+                placeholder="Client says invoices come after the 15th…"
+                aria-label="Notes"
+                className="field resize-y"
+              />
+              <button className="btn" type="submit">
+                Save note
+              </button>
+            </form>
           </section>
 
           <section className="card p-4">

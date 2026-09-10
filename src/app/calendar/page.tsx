@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { addDays, listFilings, todayISO, type FilingView } from "@/lib/store";
+import { addDays, assignees, listFilings, todayISO, type FilingView } from "@/lib/store";
 import { CATEGORY_LABEL, type Category } from "@/lib/compliance";
 import FilingRow from "@/components/FilingRow";
 import { Empty, prettyDate, rupees } from "@/components/ui";
+import SearchBox from "@/components/SearchBox";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ const MONTH_FULL = [
 export default async function Calendar({
   searchParams,
 }: {
-  searchParams: Promise<{ cat?: string; range?: string; open?: string }>;
+  searchParams: Promise<{ cat?: string; range?: string; open?: string; q?: string; assignee?: string }>;
 }) {
   const sp = await searchParams;
   const cat = (sp.cat ?? "ALL") as Category | "ALL";
@@ -36,7 +37,10 @@ export default async function Calendar({
     to: addDays(today, range.days),
     category: cat === "ALL" ? undefined : cat,
     openOnly,
+    search: sp.q,
+    assignee: sp.assignee,
   });
+  const team = await assignees();
 
   const groups = new Map<string, FilingView[]>();
   for (const f of rows) {
@@ -46,7 +50,10 @@ export default async function Calendar({
   }
 
   const qs = (over: Record<string, string>) => {
-    const p = new URLSearchParams({ cat, range: rangeKey, open: openOnly ? "1" : "0", ...over });
+    const base: Record<string, string> = { cat, range: rangeKey, open: openOnly ? "1" : "0" };
+    if (sp.q) base.q = sp.q;
+    if (sp.assignee !== undefined) base.assignee = sp.assignee;
+    const p = new URLSearchParams({ ...base, ...over });
     return "/calendar?" + p.toString();
   };
 
@@ -59,6 +66,9 @@ export default async function Calendar({
         <p className="mt-0.5 text-[13px] text-ink-3">
           Every statutory date derived from each client&rsquo;s profile. Nothing is typed in by hand.
         </p>
+        <div className="mt-3">
+          <SearchBox placeholder="Search client or filing" />
+        </div>
       </header>
 
       <div className="space-y-2.5">
@@ -78,6 +88,33 @@ export default async function Calendar({
             ))}
           </div>
         </div>
+        {team.length ? (
+          <div className="scroll-x -mx-4 px-4 md:mx-0 md:px-0">
+            <div className="flex gap-1.5">
+              <Link
+                href={"/calendar?" + new URLSearchParams({ cat, range: rangeKey, open: openOnly ? "1" : "0", ...(sp.q ? { q: sp.q } : {}) }).toString()}
+                className={
+                  "shrink-0 rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors " +
+                  (sp.assignee === undefined ? "bg-surface-3 text-ink" : "text-ink-3 hover:bg-surface-2")
+                }
+              >
+                Everyone
+              </Link>
+              {["", ...team].map((a) => (
+                <Link
+                  key={a || "unassigned"}
+                  href={qs({ assignee: a })}
+                  className={
+                    "shrink-0 rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors " +
+                    (sp.assignee === a ? "bg-brand text-white" : "text-ink-3 hover:bg-surface-2")
+                  }
+                >
+                  {a || "Unassigned"}
+                </Link>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-1.5">
           {RANGES.map((r) => (
             <Link
@@ -113,7 +150,7 @@ export default async function Calendar({
             const late = items.filter((f) => f.risk === "OVERDUE").length;
             return (
               <section key={month}>
-                <div className="sticky top-[57px] z-20 -mx-4 mb-2 flex items-center gap-2 border-b border-line bg-[color:var(--bg)]/95 px-4 py-2 backdrop-blur-sm md:mx-0 md:px-0">
+                <div className="sticky top-[57px] z-20 lg:top-0 -mx-4 mb-2 flex items-center gap-2 border-b border-line bg-[color:var(--bg)]/95 px-4 py-2 backdrop-blur-sm md:mx-0 md:px-0">
                   <h2 className="text-[13px] font-bold uppercase tracking-[0.07em] text-ink">
                     {MONTH_FULL[m - 1]} {y}
                   </h2>

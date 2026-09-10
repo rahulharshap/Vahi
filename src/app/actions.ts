@@ -11,7 +11,9 @@ import {
   listFilings,
   pendingChases,
   recordMessage,
+  setAssignee,
   setExtendedDue,
+  setNotes,
   setFilingStatus,
   syncAllFilings,
   syncClientFilings,
@@ -155,5 +157,15 @@ export async function markAllFiledForClient(clientId: string) {
   for (const f of await listFilings({ clientId })) {
     if (f.daysLeft < 0 && f.status !== "FILED") await setFilingStatus(f.id, "FILED");
   }
+  refresh();
+}
+
+export async function setAssigneeAction(filingId: string, fd: FormData) {
+  await setAssignee(filingId, String(fd.get("assignee") ?? ""));
+  refresh();
+}
+
+export async function setNotesAction(filingId: string, fd: FormData) {
+  await setNotes(filingId, String(fd.get("notes") ?? ""));
   refresh();
 }

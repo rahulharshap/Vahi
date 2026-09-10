@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { dashboard, RISK_LABEL, type FilingView } from "@/lib/store";
+import { dashboard, workload, RISK_LABEL, type FilingView } from "@/lib/store";
 import { CATEGORY_LABEL } from "@/lib/compliance";
 import FilingRow from "@/components/FilingRow";
 import { Empty, SectionHead, Stat, prettyDate, rupees } from "@/components/ui";
@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Board() {
   const d = await dashboard();
+  const team = await workload();
   const overdue = d.buckets.OVERDUE;
   const critical = d.buckets.CRITICAL;
   const atRisk = d.buckets.AT_RISK;
@@ -87,6 +88,46 @@ export default async function Board() {
         </section>
       ) : null}
 
+      {team.length > 1 ? (
+        <section className="card p-4">
+          <SectionHead
+            title="Who owns what"
+            action={
+              <span className="text-[11px] text-ink-3">open work in the next 45 days</span>
+            }
+          />
+          <div className="scroll-x -mx-1 px-1">
+            <div className="flex gap-2.5" style={{ minWidth: "min-content" }}>
+              {team.map((t) => (
+                <Link
+                  key={t.assignee ?? "unassigned"}
+                  href={"/calendar?assignee=" + encodeURIComponent(t.assignee ?? "")}
+                  className="w-[150px] shrink-0 rounded-xl border border-line bg-surface-2 p-3 transition-colors hover:border-line-strong"
+                >
+                  <div
+                    className="truncate text-[12.5px] font-bold"
+                    style={{ color: t.assignee ? "var(--text)" : "var(--warn)" }}
+                    title={t.assignee ?? "Unassigned"}
+                  >
+                    {t.assignee ?? "Unassigned"}
+                  </div>
+                  <div className="tnum mt-1 text-[20px] font-bold leading-none text-ink">{t.open}</div>
+                  <div className="mt-1 text-[11px] text-ink-3">
+                    {t.overdue ? (
+                      <span className="font-bold" style={{ color: "var(--danger)" }}>
+                        {t.overdue} overdue
+                      </span>
+                    ) : (
+                      "nothing late"
+                    )}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <div className="grid gap-5 lg:grid-cols-3">
         <Column
           title={RISK_LABEL.OVERDUE}
@@ -127,6 +168,9 @@ export default async function Board() {
   );
 }
 
+/** Columns show the most urgent slice; the rest lives on the calendar. */
+const COLUMN_CAP = 20;
+
 function Column({
   title,
   tone,
@@ -138,14 +182,24 @@ function Column({
   rows: FilingView[];
   empty: string;
 }) {
+  const shown = rows.slice(0, COLUMN_CAP);
+  const hidden = rows.length - shown.length;
   return (
     <section>
       <SectionHead title={title} count={rows.length} tone={tone} />
       {rows.length ? (
         <div className="card max-h-[520px] overflow-y-auto">
-          {rows.map((f) => (
+          {shown.map((f) => (
             <FilingRow key={f.id} f={f} />
           ))}
+          {hidden > 0 ? (
+            <Link
+              href="/calendar"
+              className="block border-t border-line px-3.5 py-2.5 text-center text-[12px] font-semibold text-brand hover:bg-surface-2"
+            >
+              {hidden} more on the calendar →
+            </Link>
+          ) : null}
         </div>
       ) : (
         <Empty title={empty} />
