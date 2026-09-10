@@ -177,6 +177,28 @@ Deploy:
 vercel --prod
 ```
 
+### Put the functions in the same region as the database
+
+`vercel.json` pins `regions: ["bom1"]` (Mumbai). This matters more than any
+code change in this repo.
+
+Vercel defaults functions to `iad1` (Washington DC). With a Supabase project
+in Mumbai, every query then makes a transatlantic round trip. Measured inside
+the deployed function:
+
+| | iad1 (default) | bom1 (pinned) |
+| --- | --- | --- |
+| `SELECT 1` | 185 ms | 1 ms |
+| `dashboard()` | 2240 ms | 29 ms |
+| Page load | ~3 s | 0.42 s |
+
+If you host the database somewhere else, change `bom1` to match it. On the
+Hobby plan `vercel.json` may be ignored — check `/api/diag`, and if `region`
+is not what you expect, set it in Settings → Functions → Function Region.
+
+Note that `X-Vercel-Id` on a response shows the *edge* location, not where
+the function ran. Only `/api/diag` tells you the truth.
+
 Seed the deployed instance once, if you want the demo data there too:
 
 ```bash
