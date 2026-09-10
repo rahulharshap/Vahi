@@ -1,2 +1,5 @@
+# sharp is Next's optional image-optimisation dependency. Adjudicating its
+# build script here keeps `pnpm install --frozen-lockfile` from exiting 1 with
+# ERR_PNPM_IGNORED_BUILDS, which is the command CI and Vercel run.
 allowBuilds:
-  sharp: set this to true or false
+  sharp: true
