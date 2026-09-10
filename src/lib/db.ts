@@ -200,3 +200,42 @@ export async function exec(sql: string, params: unknown[] = []): Promise<void> {
 export async function ensureSchema(): Promise<void> {
   if (driver === "sqlite") sqlite();
 }
+
+/**
+ * Multi-row INSERT in chunks.
+ *
+ * Seeding and calendar sync insert on the order of a thousand rows. One
+ * statement per row costs one network round trip per row, which is invisible
+ * against local SQLite and catastrophic against a pooled database in another
+ * city — the first Supabase seed took 192s this way.
+ */
+export async function insertMany(
+  table: string,
+  columns: string[],
+  rows: unknown[][],
+  chunkSize = 250,
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const cols = columns.join(", ");
+  let written = 0;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const tuple = "(" + columns.map(() => "?").join(",") + ")";
+    const sql =
+      "INSERT INTO " + table + " (" + cols + ") VALUES " + chunk.map(() => tuple).join(",");
+    await exec(sql, chunk.flat());
+    written += chunk.length;
+  }
+  return written;
+}
+
+/** Chunked `DELETE ... WHERE id IN (...)`. */
+export async function deleteByIds(table: string, ids: string[], chunkSize = 500): Promise<void> {
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    await exec(
+      "DELETE FROM " + table + " WHERE id IN (" + chunk.map(() => "?").join(",") + ")",
+      chunk,
+    );
+  }
+}

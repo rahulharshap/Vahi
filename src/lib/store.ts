@@ -1,4 +1,4 @@
-import { q, one, exec, uid, nowISO } from "./db";
+import { q, one, exec, uid, nowISO, insertMany, deleteByIds, driver } from "./db";
 import {
   generateOccurrences,
   iso,
@@ -303,31 +303,17 @@ export async function syncClientFilings(clientId: string, fromISO: string, toISO
   );
   const have = new Set(existing.map((e) => e.obligation_code + "|" + e.period_key));
 
-  let created = 0;
-  for (const o of occurrences) {
-    if (have.has(o.obligationCode + "|" + o.periodKey)) continue;
-    await exec(
-      `INSERT INTO filings
-        (id, client_id, obligation_code, title, category, authority, period_key,
-         period_label, due_date, docs_required, penalty_note, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        uid("fil"),
-        clientId,
-        o.obligationCode,
-        o.title,
-        o.category,
-        o.authority,
-        o.periodKey,
-        o.periodLabel,
-        o.dueDate,
-        JSON.stringify(o.docsRequired),
-        o.penaltyNote,
-        nowISO(),
-      ],
-    );
-    created++;
-  }
+  const ts = nowISO();
+  const fresh = occurrences.filter((o) => !have.has(o.obligationCode + "|" + o.periodKey));
+  const created = await insertMany(
+    "filings",
+    ["id", "client_id", "obligation_code", "title", "category", "authority",
+     "period_key", "period_label", "due_date", "docs_required", "penalty_note", "created_at"],
+    fresh.map((o) => [
+      uid("fil"), clientId, o.obligationCode, o.title, o.category, o.authority,
+      o.periodKey, o.periodLabel, o.dueDate, JSON.stringify(o.docsRequired), o.penaltyNote, ts,
+    ]),
+  );
 
   // drop untouched filings for obligations that no longer apply
   const validCodes = new Set(occurrences.map((o) => o.obligationCode));
@@ -336,9 +322,10 @@ export async function syncClientFilings(clientId: string, fromISO: string, toISO
       WHERE client_id=? AND status='AWAITING_DOCS' AND docs_received='[]'`,
     [clientId],
   );
-  for (const s of stale) {
-    if (!validCodes.has(s.obligation_code)) await exec("DELETE FROM filings WHERE id=?", [s.id]);
-  }
+  await deleteByIds(
+    "filings",
+    stale.filter((r) => !validCodes.has(r.obligation_code)).map((r) => r.id),
+  );
   return created;
 }
 
@@ -416,6 +403,8 @@ export async function listFilings(
     to?: string;
     status?: FilingStatus;
     category?: Category;
+    /** exclude FILED and NOT_APPLICABLE in SQL rather than in JS */
+    openOnly?: boolean;
     limit?: number;
   } = {},
 ): Promise<FilingView[]> {
@@ -440,6 +429,9 @@ export async function listFilings(
   if (opts.category) {
     where.push("f.category = ?");
     params.push(opts.category);
+  }
+  if (opts.openOnly) {
+    where.push("f.status NOT IN ('FILED','NOT_APPLICABLE')");
   }
   const sql =
     FILING_SELECT +
@@ -548,13 +540,12 @@ export async function recentMessages(limit = 40) {
   return q<{
     id: string;
     stage: Stage;
-    body: string;
     status: string;
     sent_at: string;
     clientname: string;
     title: string;
   }>(
-    `SELECT m.id, m.stage, m.body, m.status, m.sent_at, c.name AS clientname, f.title
+    `SELECT m.id, m.stage, m.status, m.sent_at, c.name AS clientname, f.title
        FROM messages m
        JOIN clients c ON c.id = m.client_id
        JOIN filings f ON f.id = m.filing_id
@@ -565,6 +556,10 @@ export async function recentMessages(limit = 40) {
 }
 
 // -------------------------------------------------------------- dashboard
+
+/** How far back the board reaches. Older overdue items live on the client
+ *  page and the calendar; surfacing year-old misses on the board is noise. */
+export const BOARD_LOOKBACK_DAYS = 120;
 
 export interface Dashboard {
   today: string;
@@ -579,7 +574,7 @@ export interface Dashboard {
 
 export async function dashboard(): Promise<Dashboard> {
   const today = todayISO();
-  const rows = await listFilings({ from: addDays(today, -400), to: addDays(today, 45) });
+  const rows = await listFilings({ from: addDays(today, -BOARD_LOOKBACK_DAYS), to: addDays(today, 45) });
 
   const buckets: Record<Risk, FilingView[]> = {
     OVERDUE: [],
@@ -630,4 +625,102 @@ export async function dashboard(): Promise<Dashboard> {
     filedThisMonth: Number(filedRow?.n ?? 0),
     byCategory: [...cats.entries()].map(([category, v]) => ({ category, ...v })).sort((a, b) => b.open - a.open),
   };
+}
+
+
+// ------------------------------------------------------- client roster view
+
+export interface ClientSummary {
+  client: ClientRow;
+  open: number;
+  overdue: number;
+  exposure: number;
+  worst: Risk;
+  next: { title: string; effectiveDue: string } | null;
+}
+
+/**
+ * Roster with per-client counts in two queries rather than one query per
+ * client. The N+1 version issued 52 round trips and took four seconds against
+ * Supabase.
+ */
+export async function clientSummaries(): Promise<ClientSummary[]> {
+  const clients = await listClients();
+  if (clients.length === 0) return [];
+  const today = todayISO();
+
+  const rows = await q<{
+    client_id: string;
+    obligation_code: string;
+    status: FilingStatus;
+    title: string;
+    effective_due: string;
+  }>(
+    `SELECT f.client_id, f.obligation_code, f.status, f.title,
+            COALESCE(f.extended_due, f.due_date) AS effective_due
+       FROM filings f JOIN clients c ON c.id = f.client_id
+      WHERE c.firm_id = ?
+        AND f.status NOT IN ('FILED','NOT_APPLICABLE')
+        AND COALESCE(f.extended_due, f.due_date) >= ?
+      ORDER BY COALESCE(f.extended_due, f.due_date) ASC`,
+    [FIRM_ID, addDays(today, -BOARD_LOOKBACK_DAYS)],
+  );
+
+  const byClient = new Map<string, ClientSummary>();
+  for (const c of clients) {
+    byClient.set(c.id, { client: c, open: 0, overdue: 0, exposure: 0, worst: "ON_TRACK", next: null });
+  }
+  const severity: Record<Risk, number> = { OVERDUE: 5, CRITICAL: 4, AT_RISK: 3, ON_TRACK: 2, FILED: 1, NA: 0 };
+
+  for (const r of rows) {
+    const entry = byClient.get(r.client_id);
+    if (!entry) continue;
+    const due = String(r.effective_due).slice(0, 10);
+    const daysLeft = daysBetween(today, due);
+    const risk = riskOf(r.status, daysLeft);
+    entry.open++;
+    if (risk === "OVERDUE") entry.overdue++;
+    entry.exposure += estimateExposure(r.obligation_code, -daysLeft);
+    if (severity[risk] > severity[entry.worst]) entry.worst = risk;
+    if (!entry.next && daysLeft >= 0) entry.next = { title: r.title, effectiveDue: due };
+  }
+
+  return [...byClient.values()].sort(
+    (a, b) => b.overdue - a.overdue || b.exposure - a.exposure || a.client.name.localeCompare(b.client.name),
+  );
+}
+
+/**
+ * Apply per-row status/docs/filed_at updates in chunked statements.
+ *
+ * Used by the seeder to backfill ~1,700 filings into believable states. One
+ * UPDATE per row is a round trip per row; a CASE over an id list does a
+ * chunk at a time.
+ */
+export async function bulkUpdateFilings(
+  updates: Array<{ id: string; status: FilingStatus; docsReceived: string; filedAt: string | null }>,
+  chunkSize = 150,
+): Promise<number> {
+  // Postgres needs the CASE result cast to match the timestamptz column;
+  // SQLite stores it as text and must not see the cast.
+  const tsCast = driver === "postgres" ? "::timestamptz" : "";
+  let n = 0;
+  for (let i = 0; i < updates.length; i += chunkSize) {
+    const chunk = updates.slice(i, i + chunkSize);
+    const caseFor = (expr: string) => "CASE id " + chunk.map(() => "WHEN ? THEN " + expr).join(" ") + " END";
+    const params: unknown[] = [];
+    for (const u of chunk) params.push(u.id, u.status);
+    for (const u of chunk) params.push(u.id, u.docsReceived);
+    for (const u of chunk) params.push(u.id, u.filedAt);
+    for (const u of chunk) params.push(u.id);
+    await exec(
+      "UPDATE filings SET status = " + caseFor("?") +
+        ", docs_received = " + caseFor("?") +
+        ", filed_at = " + caseFor("?" + tsCast) +
+        " WHERE id IN (" + chunk.map(() => "?").join(",") + ")",
+      params,
+    );
+    n += chunk.length;
+  }
+  return n;
 }

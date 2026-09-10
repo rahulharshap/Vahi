@@ -3,6 +3,8 @@ import { reseed } from "@/lib/seed";
 import { driver } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+// seeding writes ~1,700 rows; the default 10s function limit is not enough
+export const maxDuration = 60;
 
 /**
  * Seed the demo roster into whichever database is configured.

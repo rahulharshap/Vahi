@@ -31,12 +31,12 @@ export default async function Calendar({
   const openOnly = sp.open !== "0";
 
   const today = todayISO();
-  let rows = await listFilings({
+  const rows = await listFilings({
     from: addDays(today, -60),
     to: addDays(today, range.days),
     category: cat === "ALL" ? undefined : cat,
+    openOnly,
   });
-  if (openOnly) rows = rows.filter((f) => f.status !== "FILED" && f.status !== "NOT_APPLICABLE");
 
   const groups = new Map<string, FilingView[]>();
   for (const f of rows) {

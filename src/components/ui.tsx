@@ -108,7 +108,7 @@ export function Stat({
     </div>
   );
   return href ? (
-    <Link href={href} className="block transition-transform hover:-translate-y-0.5">
+    <Link href={href} className="block">
       {body}
     </Link>
   ) : (
