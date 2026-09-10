@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
-import { firm } from "@/lib/store";
+import { firmSafe } from "@/lib/store";
 import { driver } from "@/lib/db";
 import { seedIfEmpty } from "@/lib/seed";
 
@@ -21,8 +21,14 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // local SQLite builds and seeds itself; Postgres is seeded by POST /api/seed
-  if (driver === "sqlite") await seedIfEmpty();
-  const f = await firm();
+  if (driver === "sqlite") {
+    try {
+      await seedIfEmpty();
+    } catch {
+      // a broken local database must not take the whole app down
+    }
+  }
+  const f = await firmSafe();
   return (
     <html lang="en">
       <body>

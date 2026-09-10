@@ -2,6 +2,8 @@ import Link from "next/link";
 import ClientForm from "@/components/ClientForm";
 import { createClientAction } from "@/app/actions";
 
+export const dynamic = "force-dynamic";
+
 export default function NewClient() {
   return (
     <div className="mx-auto max-w-2xl space-y-5">

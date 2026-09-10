@@ -205,6 +205,25 @@ export async function ensureFirm(name = "Rao & Associates, Chartered Accountants
 
 export const firm = ensureFirm;
 
+export const DEFAULT_FIRM = { id: FIRM_ID, name: "Vahi", city: "" };
+
+/**
+ * Firm details for chrome that renders on every page, including during the
+ * production build's prerender of /_not-found and other static routes.
+ *
+ * The build machine often cannot reach the database — no env vars, no
+ * network path, or simply a database that does not exist yet — and a header
+ * is not worth failing a deploy over. Anything that actually needs the
+ * database uses ensureFirm() and is allowed to fail loudly.
+ */
+export async function firmSafe(): Promise<{ id: string; name: string; city: string }> {
+  try {
+    return await ensureFirm();
+  } catch {
+    return DEFAULT_FIRM;
+  }
+}
+
 // ---------------------------------------------------------------- clients
 
 export async function listClients(): Promise<ClientRow[]> {
