@@ -623,25 +623,24 @@ export async function dashboard(): Promise<Dashboard> {
     (f) => f.effectiveDue >= lookback && f.effectiveDue <= horizon && dueStage(f) !== null,
   ).length;
 
+  // one round trip, not two — each costs a full network hop to the database
   const monthStart = today.slice(0, 7) + "-01";
-  const filedRow = await one<{ n: number | string }>(
-    `SELECT COUNT(*) AS n FROM filings f JOIN clients c ON c.id=f.client_id
-      WHERE c.firm_id=? AND f.status='FILED' AND f.filed_at >= ?`,
-    [FIRM_ID, monthStart],
-  );
-  const clientRow = await one<{ n: number | string }>(
-    "SELECT COUNT(*) AS n FROM clients WHERE firm_id = ?",
-    [FIRM_ID],
+  const counts = await one<{ filed: number | string; clients: number | string }>(
+    `SELECT
+       (SELECT COUNT(*) FROM filings f JOIN clients c ON c.id=f.client_id
+         WHERE c.firm_id=? AND f.status='FILED' AND f.filed_at >= ?) AS filed,
+       (SELECT COUNT(*) FROM clients WHERE firm_id=?) AS clients`,
+    [FIRM_ID, monthStart, FIRM_ID],
   );
 
   return {
     today,
-    clientCount: Number(clientRow?.n ?? 0),
+    clientCount: Number(counts?.clients ?? 0),
     buckets,
     exposure,
     next30: rows.filter((r) => r.daysLeft >= 0 && r.daysLeft <= 30 && r.risk !== "FILED" && r.risk !== "NA"),
     chasesDue,
-    filedThisMonth: Number(filedRow?.n ?? 0),
+    filedThisMonth: Number(counts?.filed ?? 0),
     byCategory: [...cats.entries()].map(([category, v]) => ({ category, ...v })).sort((a, b) => b.open - a.open),
   };
 }
