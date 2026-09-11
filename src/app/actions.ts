@@ -96,12 +96,13 @@ export async function resyncAction() {
   const today = todayISO();
   await syncAllFilings(addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
   refresh();
+  redirect("/board");
 }
 
 export async function reseedAction() {
   await reseed();
   refresh();
-  redirect("/");
+  redirect("/board");
 }
 
 /** Send one chase. Returns nothing; the row disappears from the queue. */

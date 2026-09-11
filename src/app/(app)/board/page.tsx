@@ -3,7 +3,7 @@ import { dashboard, workload, RISK_LABEL, type FilingView } from "@/lib/store";
 import { CATEGORY_LABEL } from "@/lib/compliance";
 import FilingRow from "@/components/FilingRow";
 import { Empty, SectionHead, Stat, prettyDate, rupees } from "@/components/ui";
-import { resyncAction } from "./actions";
+import { resyncAction } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 

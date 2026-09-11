@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/", label: "Board", hint: "What needs attention", icon: BoardIcon },
+  { href: "/board", label: "Board", hint: "What needs attention", icon: BoardIcon },
   { href: "/calendar", label: "Calendar", hint: "Every statutory date", icon: CalendarIcon },
   { href: "/chases", label: "Chases", hint: "Documents to collect", icon: ChatIcon },
   { href: "/clients", label: "Clients", hint: "The roster", icon: PeopleIcon },
@@ -12,7 +12,7 @@ const LINKS = [
 
 function useActive() {
   const pathname = usePathname();
-  return (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  return (href: string) => pathname.startsWith(href);
 }
 
 /**

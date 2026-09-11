@@ -16,3 +16,10 @@ data/*.db-shm
 .DS_Store
 *.log
 .vercel
+
+# scratch — loop state, screenshots
+.tmp/
+
+# local pnpm store, TS build cache — machine-specific, never commit
+.pnpm-store/
+*.tsbuildinfo

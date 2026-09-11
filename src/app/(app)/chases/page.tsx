@@ -3,7 +3,7 @@ import { firm, pendingChases, recentMessages } from "@/lib/store";
 import { composeChase, STAGE_LABEL, type Stage } from "@/lib/whatsapp";
 import { Empty, SectionHead, prettyDate } from "@/components/ui";
 import SearchBox from "@/components/SearchBox";
-import { sendAllChasesAction, sendChaseAction } from "../actions";
+import { sendAllChasesAction, sendChaseAction } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
