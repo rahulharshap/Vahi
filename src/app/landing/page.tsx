@@ -41,12 +41,8 @@ function Header() {
 function Hero() {
   return (
     <section className="mx-auto w-full max-w-6xl px-4 pb-14 pt-12 md:px-6 md:pb-20 md:pt-16">
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-8">
-        <div className="flex flex-col gap-4">
-          <RiskBoardMock />
-        </div>
-
-        <div className="flex flex-col justify-center">
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-8">
+        <div className="flex flex-col justify-center lg:order-1">
           <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-accent">
             Compliance command centre for CA practices
           </p>
@@ -65,6 +61,10 @@ function Hero() {
           <p className="mt-4 text-[12.5px] leading-relaxed text-ink-3">
             Live demo in the header. Sample data, fictional Hyderabad practice, no signup.
           </p>
+        </div>
+
+        <div className="flex flex-col gap-4 lg:order-2">
+          <RiskBoardMock />
         </div>
       </div>
     </section>
