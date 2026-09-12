@@ -1,4 +1,5 @@
 import { q, one, exec, uid, nowISO, insertMany, deleteByIds } from "./db";
+import { currentFirmId, resetFirmCache } from "./tenant";
 import {
   generateOccurrences,
   iso,
@@ -10,7 +11,14 @@ import {
 } from "./compliance";
 import { STAGE_OFFSET, type Stage } from "./whatsapp";
 
-export const FIRM_ID = "firm_demo";
+/**
+ * The firm every query is scoped to.
+ *
+ * This was a constant; it is now resolved per call. Kept as a one-line helper
+ * so the ~19 call sites read the same as before, and so that adding auth means
+ * changing where currentFirmId() looks — not touching a single query.
+ */
+const firmId = currentFirmId;
 
 export type FilingStatus =
   | "AWAITING_DOCS"
@@ -199,24 +207,38 @@ export function riskOf(status: FilingStatus, daysLeft: number): Risk {
 
 // ------------------------------------------------------------------ firms
 
+/**
+ * Bootstrap: make sure a firm exists, and return it.
+ *
+ * Resolving the current firm requires a firm to exist, so this cannot use
+ * currentFirmId() to create the first one. On an empty database it creates the
+ * bootstrap firm; after that it simply returns whichever firm this request is
+ * acting for.
+ */
+export const BOOTSTRAP_FIRM_ID = "firm_demo";
+
 export async function ensureFirm(name = "Rao & Associates, Chartered Accountants", city = "Hyderabad") {
-  const existing = await one<{ id: string }>("SELECT id FROM firms WHERE id = ?", [FIRM_ID]);
-  if (!existing) {
-    await exec("INSERT INTO firms (id, name, city, created_at) VALUES (?, ?, ?, ?)", [
-      FIRM_ID,
-      name,
-      city,
+  const any = await one<{ id: string }>("SELECT id FROM firms WHERE active ORDER BY created_at ASC LIMIT 1");
+  if (!any) {
+    const id = process.env.DEFAULT_FIRM_ID || BOOTSTRAP_FIRM_ID;
+    await exec(
+      "INSERT INTO firms (id, name, city, slug, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+      [id, name, city, "demo", nowISO()],
+    );
+    await exec("INSERT INTO firm_settings (firm_id, updated_at) VALUES (?, ?) ON CONFLICT DO NOTHING", [
+      id,
       nowISO(),
     ]);
+    resetFirmCache();
   }
   return (await one<{ id: string; name: string; city: string }>("SELECT * FROM firms WHERE id = ?", [
-    FIRM_ID,
+    await firmId(),
   ]))!;
 }
 
 export const firm = ensureFirm;
 
-export const DEFAULT_FIRM = { id: FIRM_ID, name: "Vahi", city: "" };
+export const DEFAULT_FIRM = { id: await firmId(), name: "Vahi", city: "" };
 
 /**
  * Firm details for chrome that renders on every page, including during the
@@ -240,7 +262,7 @@ export async function firmSafe(): Promise<{ id: string; name: string; city: stri
 export async function listClients(search?: string): Promise<ClientRow[]> {
   const term = search?.trim();
   if (!term) {
-    return q<ClientRow>("SELECT * FROM clients WHERE firm_id = ? ORDER BY name", [FIRM_ID]);
+    return q<ClientRow>("SELECT * FROM clients WHERE firm_id = ? ORDER BY name", [await firmId()]);
   }
   const like = "%" + term.toLowerCase() + "%";
   return q<ClientRow>(
@@ -249,7 +271,7 @@ export async function listClients(search?: string): Promise<ClientRow[]> {
         AND (LOWER(name) LIKE ? OR LOWER(COALESCE(pan,'')) LIKE ?
              OR LOWER(COALESCE(gstin,'')) LIKE ? OR LOWER(COALESCE(contact_name,'')) LIKE ?)
       ORDER BY name`,
-    [FIRM_ID, like, like, like, like],
+    [await firmId(), like, like, like, like],
   );
 }
 
@@ -284,7 +306,7 @@ export async function createClient(input: ClientInput): Promise<string> {
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       id,
-      FIRM_ID,
+      await firmId(),
       input.name,
       input.entityType,
       input.pan ?? null,
@@ -462,7 +484,7 @@ export async function listFilings(
   } = {},
 ): Promise<FilingView[]> {
   const where: string[] = [];
-  const params: unknown[] = [FIRM_ID];
+  const params: unknown[] = [await firmId()];
   if (opts.clientId) {
     where.push("f.client_id = ?");
     params.push(opts.clientId);
@@ -512,7 +534,7 @@ export async function listFilings(
 }
 
 export async function getFiling(id: string): Promise<FilingView | undefined> {
-  const row = await one<JoinedFilingRow>(FILING_SELECT + " AND f.id = ?", [FIRM_ID, id]);
+  const row = await one<JoinedFilingRow>(FILING_SELECT + " AND f.id = ?", [await firmId(), id]);
   if (!row) return undefined;
   const chases = await attachChases([row]);
   return hydrate(row, chases, todayISO());
@@ -620,7 +642,7 @@ export async function recentMessages(limit = 40) {
        JOIN filings f ON f.id = m.filing_id
       WHERE c.firm_id = ?
       ORDER BY m.created_at DESC LIMIT ?`,
-    [FIRM_ID, limit],
+    [await firmId(), limit],
   );
 }
 
@@ -680,7 +702,7 @@ export async function dashboard(): Promise<Dashboard> {
        (SELECT COUNT(*) FROM filings f JOIN clients c ON c.id=f.client_id
          WHERE c.firm_id=? AND f.status='FILED' AND f.filed_at >= ?) AS filed,
        (SELECT COUNT(*) FROM clients WHERE firm_id=?) AS clients`,
-    [FIRM_ID, monthStart, FIRM_ID],
+    [await firmId(), monthStart, await firmId()],
   );
 
   return {
@@ -731,7 +753,7 @@ export async function clientSummaries(search?: string): Promise<ClientSummary[]>
         AND f.status NOT IN ('FILED','NOT_APPLICABLE')
         AND COALESCE(f.extended_due, f.due_date) >= ?
       ORDER BY COALESCE(f.extended_due, f.due_date) ASC`,
-    [FIRM_ID, addDays(today, -BOARD_LOOKBACK_DAYS)],
+    [await firmId(), addDays(today, -BOARD_LOOKBACK_DAYS)],
   );
 
   const byClient = new Map<string, ClientSummary>();
@@ -822,7 +844,7 @@ export async function workload(): Promise<
         AND f.status NOT IN ('FILED','NOT_APPLICABLE')
         AND COALESCE(f.extended_due, f.due_date) >= ?
         AND COALESCE(f.extended_due, f.due_date) <= ?`,
-    [FIRM_ID, addDays(today, -BOARD_LOOKBACK_DAYS), addDays(today, 45)],
+    [await firmId(), addDays(today, -BOARD_LOOKBACK_DAYS), addDays(today, 45)],
   );
   const map = new Map<string, { assignee: string | null; open: number; overdue: number; exposure: number }>();
   for (const r of rows) {
@@ -846,7 +868,7 @@ export async function assignees(): Promise<string[]> {
   const rows = await q<{ assignee: string }>(
     `SELECT DISTINCT f.assignee FROM filings f JOIN clients c ON c.id = f.client_id
       WHERE c.firm_id = ? AND f.assignee IS NOT NULL AND f.assignee <> '' ORDER BY f.assignee`,
-    [FIRM_ID],
+    [await firmId()],
   );
   return rows.map((r) => r.assignee);
 }
@@ -891,7 +913,7 @@ export async function recordDocument(doc: {
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       id,
-      FIRM_ID,
+      await firmId(),
       doc.filingId,
       doc.clientId,
       doc.docLabel,
@@ -913,7 +935,7 @@ export async function recordDocument(doc: {
 export async function unmatchedDocuments(): Promise<DocumentRow[]> {
   return q<DocumentRow>(
     "SELECT * FROM documents WHERE firm_id = ? AND filing_id IS NULL ORDER BY received_at DESC",
-    [FIRM_ID],
+    [await firmId()],
   );
 }
 
@@ -930,7 +952,7 @@ export async function assignDocument(documentId: string, filingId: string, docLa
     filingId,
     docLabel,
     documentId,
-    FIRM_ID,
+    await firmId(),
   ]);
   if (docLabel) await markDocReceived(filingId, docLabel);
 }
@@ -980,7 +1002,7 @@ export async function clientByEmail(address: string): Promise<ClientRow | undefi
   const clean = address.toLowerCase().replace(/^.*</, "").replace(/>.*$/, "").trim();
   if (!clean) return undefined;
   return one<ClientRow>("SELECT * FROM clients WHERE firm_id = ? AND LOWER(COALESCE(email,'')) = ?", [
-    FIRM_ID,
+    await firmId(),
     clean,
   ]);
 }

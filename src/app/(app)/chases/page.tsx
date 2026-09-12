@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { firm, pendingChases, recentMessages } from "@/lib/store";
-import { composeChase, STAGE_LABEL, type Stage } from "@/lib/whatsapp";
+import { STAGE_LABEL, type Stage } from "@/lib/whatsapp";
+import { composeFromTemplate } from "@/lib/messages";
+import { currentFirmId } from "@/lib/tenant";
 import { Empty, SectionHead, prettyDate } from "@/components/ui";
 import SearchBox from "@/components/SearchBox";
 import { sendAllChasesAction, sendChaseAction } from "@/app/actions";
@@ -38,6 +40,7 @@ export default async function Chases({
   const hidden = matched.length - queue.length;
   const history = await recentMessages(25);
   const f = await firm();
+  const firmId = await currentFirmId();
 
   return (
     <div className="space-y-6">
@@ -77,17 +80,20 @@ export default async function Chases({
         <SectionHead title={term ? "Matching “" + sp.q + "”" : "Queued now"} count={matched.length} />
         {queue.length ? (
           <div className="space-y-3">
-            {queue.map(({ filing, stage }) => {
-              const body = composeChase(stage, {
+            {await Promise.all(queue.map(async ({ filing, stage }) => {
+              const channel = filing.contactPhone ? "WHATSAPP" : "EMAIL";
+              const composed = await composeFromTemplate(firmId, channel, stage, {
                 clientName: filing.clientName,
                 contactName: filing.contactName,
                 filingTitle: filing.title,
                 periodLabel: filing.period_label,
                 dueDate: filing.effectiveDue,
                 docsOutstanding: filing.docsOutstanding,
-                firmName: f.name,
                 penaltyNote: filing.penalty_note,
+                firmName: f.name,
+                filingId: filing.id,
               });
+              const body = composed.body;
               const send = sendChaseAction.bind(null, filing.id, stage);
               return (
                 <article key={filing.id} className="card overflow-hidden">
@@ -125,7 +131,7 @@ export default async function Chases({
                   </div>
                 </article>
               );
-            })}
+            }))}
           </div>
         ) : (
           <Empty

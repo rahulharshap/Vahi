@@ -11,6 +11,8 @@ const LINKS = [
   { href: "/clients", label: "Clients", hint: "The roster", icon: PeopleIcon },
 ];
 
+const SETTINGS = { href: "/settings", label: "Settings", hint: "Templates, number, keys", icon: GearIcon };
+
 function useActive() {
   const pathname = usePathname();
   return (href: string) => pathname.startsWith(href);
@@ -71,7 +73,31 @@ export function Sidebar({ firmName, city }: { firmName: string; city: string }) 
         </Link>
       </div>
 
-      <div className="mt-auto border-t border-line px-4 py-3">
+      <div className="mt-auto px-2.5 pb-1">
+        <Link
+          href={SETTINGS.href}
+          aria-current={isActive(SETTINGS.href) ? "page" : undefined}
+          className={
+            "flex items-start gap-2.5 rounded-[10px] px-2.5 py-2 transition-colors " +
+            (isActive(SETTINGS.href) ? "bg-brand-soft" : "hover:bg-surface-2")
+          }
+        >
+          <span className="mt-0.5 shrink-0" style={{ color: isActive(SETTINGS.href) ? "var(--brand)" : "var(--text-3)" }}>
+            <GearIcon />
+          </span>
+          <span className="min-w-0">
+            <span
+              className="block text-[13.5px] font-semibold leading-tight"
+              style={{ color: isActive(SETTINGS.href) ? "var(--brand-ink)" : "var(--text)" }}
+            >
+              {SETTINGS.label}
+            </span>
+            <span className="block text-[11px] leading-tight text-ink-3">{SETTINGS.hint}</span>
+          </span>
+        </Link>
+      </div>
+
+      <div className="border-t border-line px-4 py-3">
         <div className="truncate text-[12px] font-semibold text-ink-2" title={firmName}>
           {firmName}
         </div>
@@ -95,7 +121,10 @@ export function TopBar({ firmName, city }: { firmName: string; city: string }) {
             </span>
           </span>
         </Link>
-        <Link href="/clients/new" className="btn btn-primary ml-auto">
+        <Link href="/settings" aria-label="Settings" className="btn btn-ghost ml-auto px-2">
+          <GearIcon />
+        </Link>
+        <Link href="/clients/new" className="btn btn-primary">
           <span className="text-base leading-none">+</span>
           <span className="hidden sm:inline">Client</span>
         </Link>
@@ -187,6 +216,15 @@ function InboxIcon() {
     <svg {...S}>
       <path d="M3 13h4l1.5 3h7L17 13h4" />
       <path d="M4.5 5.5 3 13v5a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-5l-1.5-7.5A1 1 0 0 0 18.5 5h-13a1 1 0 0 0-1 .5Z" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg {...S}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-3-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.4 15a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 2.9-1.2V4a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9 2 2 0 1 1 0 4Z" />
     </svg>
   );
 }

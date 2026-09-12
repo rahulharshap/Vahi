@@ -26,8 +26,10 @@ import {
   type ClientInput,
   type FilingStatus,
 } from "@/lib/store";
-import { composeChase, type Stage } from "@/lib/whatsapp";
-import { buildDeliveries, channelsFor, deliver } from "@/lib/notify";
+import { type Stage } from "@/lib/whatsapp";
+import { channelsFor, deliver } from "@/lib/notify";
+import { composeFromTemplate } from "@/lib/messages";
+import { replyAddress } from "@/lib/intake";
 import { reseed } from "@/lib/seed";
 import type { EntityType, GstScheme } from "@/lib/compliance";
 import type { Channel } from "@/lib/store";
@@ -118,41 +120,49 @@ export async function sendChaseAction(filingId: string, stage: Stage) {
   const client = await getClient(f.client_id);
   if (!client) return;
 
-  const ctx = {
+  const firmId = await currentFirmId();
+  const facts = {
     clientName: f.clientName,
     contactName: f.contactName,
     filingTitle: f.title,
     periodLabel: f.period_label,
     dueDate: f.effectiveDue,
     docsOutstanding: f.docsOutstanding,
-    firmName: (await firm()).name,
     penaltyNote: f.penalty_note,
+    firmName: (await firm()).name,
+    filingId: f.id,
   };
 
-  const deliveries = buildDeliveries(
-    channelsFor(client),
-    stage,
-    ctx,
-    { phone: client.contact_phone, email: client.email },
-    f.id,
-  );
+  const channels = channelsFor(client);
 
-  // a client with no usable address still gets a recorded attempt, so the
-  // gap shows up in the history rather than disappearing
-  if (deliveries.length === 0) {
-    await recordMessage(f.id, f.client_id, stage, composeChase(stage, ctx), "NO_ADDRESS", "WHATSAPP");
+  // a client with no usable address still records an attempt, so the gap shows
+  // up in the history rather than disappearing
+  if (channels.length === 0) {
+    const fallback = await composeFromTemplate(firmId, "WHATSAPP", stage, facts);
+    await recordMessage(f.id, f.client_id, stage, fallback.body, "NO_ADDRESS", "WHATSAPP");
     refresh();
     return;
   }
 
-  for (const d of deliveries) {
+  for (const channel of channels) {
+    const composed = await composeFromTemplate(firmId, channel, stage, facts);
+    const to = channel === "EMAIL" ? client.email : client.contact_phone;
+    if (!to) continue;
     let status: string;
     try {
-      status = (await deliver(d)).status;
+      status = (
+        await deliver({
+          channel,
+          to,
+          body: composed.body,
+          subject: composed.subject ?? undefined,
+          replyTo: channel === "EMAIL" ? replyAddress(f.id) : undefined,
+        })
+      ).status;
     } catch {
       status = "FAILED";
     }
-    await recordMessage(f.id, f.client_id, stage, d.body, status, d.channel);
+    await recordMessage(f.id, f.client_id, stage, composed.body, status, channel);
   }
   refresh();
 }
@@ -169,16 +179,18 @@ export async function previewChase(filingId: string): Promise<string | null> {
   const f = await getFiling(filingId);
   if (!f) return null;
   const stage = dueStage(f) ?? "T10";
-  return composeChase(stage, {
+  const composed = await composeFromTemplate(await currentFirmId(), "WHATSAPP", stage, {
     clientName: f.clientName,
     contactName: f.contactName,
     filingTitle: f.title,
     periodLabel: f.period_label,
     dueDate: f.effectiveDue,
     docsOutstanding: f.docsOutstanding,
-    firmName: (await firm()).name,
     penaltyNote: f.penalty_note,
+    firmName: (await firm()).name,
+    filingId: f.id,
   });
+  return composed.body;
 }
 
 export async function markAllFiledForClient(clientId: string) {
@@ -203,5 +215,72 @@ export async function assignDocumentAction(documentId: string, fd: FormData) {
   const [filingId, docLabel] = target.split("::");
   if (!filingId) return;
   await assignDocument(documentId, filingId, docLabel || null);
+  refresh();
+}
+
+// ------------------------------------------------------------- settings
+
+import {
+  createApiKey,
+  currentFirmId,
+  revokeApiKey,
+  updateFirm,
+  updateSettings,
+  type SettingsInput,
+} from "@/lib/tenant";
+import { saveTemplate, resetTemplate } from "@/lib/messages";
+
+const str = (fd: FormData, k: string) => (String(fd.get(k) ?? "").trim() || null) as string | null;
+
+export async function saveFirmAction(fd: FormData) {
+  const firmId = await currentFirmId();
+  await updateFirm(firmId, {
+    name: String(fd.get("name") ?? "").trim() || undefined,
+    city: String(fd.get("city") ?? "").trim() || undefined,
+    timezone: String(fd.get("timezone") ?? "").trim() || undefined,
+  });
+  const settings: SettingsInput = {
+    sender_name: str(fd, "sender_name"),
+    wa_business_number: str(fd, "wa_business_number"),
+    reply_to_email: str(fd, "reply_to_email"),
+    intake_domain: str(fd, "intake_domain"),
+    wa_provider: str(fd, "wa_provider"),
+    email_provider: str(fd, "email_provider"),
+    wa_credential_ref: str(fd, "wa_credential_ref"),
+    email_credential_ref: str(fd, "email_credential_ref"),
+    default_channel: String(fd.get("default_channel") ?? "WHATSAPP") as "WHATSAPP" | "EMAIL" | "BOTH",
+    chase_enabled: fd.get("chase_enabled") === "on",
+    chase_send_hour: Number(fd.get("chase_send_hour") ?? 9) || 9,
+    chase_lookback_days: Number(fd.get("chase_lookback_days") ?? 45) || 45,
+  };
+  await updateSettings(firmId, settings);
+  refresh();
+}
+
+export async function createApiKeyAction(fd: FormData) {
+  const firmId = await currentFirmId();
+  const name = String(fd.get("keyName") ?? "").trim() || "Untitled key";
+  const scopes = String(fd.get("scopes") ?? "read") as "read" | "write" | "admin";
+  const created = await createApiKey(firmId, name, scopes);
+  refresh();
+  // the plaintext is shown once, via the URL, and never stored
+  redirect("/settings?created=" + encodeURIComponent(created.plaintext));
+}
+
+export async function revokeApiKeyAction(id: string) {
+  await revokeApiKey(await currentFirmId(), id);
+  refresh();
+}
+
+export async function saveTemplateAction(channel: "WHATSAPP" | "EMAIL", stage: string, fd: FormData) {
+  await saveTemplate(await currentFirmId(), channel, stage as never, {
+    subject: str(fd, "subject"),
+    body: String(fd.get("body") ?? ""),
+  });
+  refresh();
+}
+
+export async function resetTemplateAction(channel: "WHATSAPP" | "EMAIL", stage: string) {
+  await resetTemplate(await currentFirmId(), channel, stage as never);
   refresh();
 }

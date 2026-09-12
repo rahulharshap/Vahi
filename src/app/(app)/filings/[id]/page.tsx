@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { assignees, dueStage, firm, getFiling, listMessages, STATUS_LABEL, type FilingStatus } from "@/lib/store";
-import { composeChase, STAGE_LABEL } from "@/lib/whatsapp";
+import { STAGE_LABEL } from "@/lib/whatsapp";
+import { composeFromTemplate } from "@/lib/messages";
+import { currentFirmId } from "@/lib/tenant";
 import { CATEGORY_LABEL } from "@/lib/compliance";
 import { CategoryTag, DueLabel, Empty, RiskPill, SectionHead, StatusPill, prettyDate, rupees } from "@/components/ui";
 import { sendChaseAction, setAssigneeAction, setExtendedDueAction, setNotesAction, setStatusAction, toggleDocAction } from "@/app/actions";
@@ -23,16 +25,19 @@ export default async function FilingDetail({ params }: { params: Promise<{ id: s
   const team = await assignees();
 
   const preview = f.docsOutstanding.length
-    ? composeChase(stage ?? "T10", {
-        clientName: f.clientName,
-        contactName: f.contactName,
-        filingTitle: f.title,
-        periodLabel: f.period_label,
-        dueDate: f.effectiveDue,
-        docsOutstanding: f.docsOutstanding,
-        firmName: (await firm()).name,
-        penaltyNote: f.penalty_note,
-      })
+    ? (
+        await composeFromTemplate(await currentFirmId(), f.contactPhone ? "WHATSAPP" : "EMAIL", stage ?? "T10", {
+          clientName: f.clientName,
+          contactName: f.contactName,
+          filingTitle: f.title,
+          periodLabel: f.period_label,
+          dueDate: f.effectiveDue,
+          docsOutstanding: f.docsOutstanding,
+          penaltyNote: f.penalty_note,
+          firmName: (await firm()).name,
+          filingId: f.id,
+        })
+      ).body
     : null;
 
   return (

@@ -1,6 +1,5 @@
 import { q, exec, uid, nowISO, insertMany } from "./db";
 import {
-  FIRM_ID,
   addDays,
   createClient,
   ensureFirm,
@@ -10,6 +9,7 @@ import {
   type ClientInput,
 } from "./store";
 import { composeChase, type Stage } from "./whatsapp";
+import { currentFirmId } from "./tenant";
 import { bulkUpdateFilings } from "./store";
 
 /**
@@ -63,7 +63,9 @@ function rng(seed: number) {
 }
 
 export async function seedIfEmpty(): Promise<boolean> {
-  const existing = await q<{ n: number | string }>("SELECT COUNT(*) AS n FROM clients WHERE firm_id=?", [FIRM_ID]);
+  const existing = await q<{ n: number | string }>("SELECT COUNT(*) AS n FROM clients WHERE firm_id=?", [
+    await currentFirmId(),
+  ]);
   if (Number(existing[0]?.n ?? 0) > 0) return false;
   return reseed();
 }
@@ -72,7 +74,7 @@ export async function reseed(): Promise<boolean> {
   await ensureFirm("Rao & Associates, Chartered Accountants", "Hyderabad");
   await exec("DELETE FROM messages");
   await exec("DELETE FROM filings");
-  await exec("DELETE FROM clients WHERE firm_id=?", [FIRM_ID]);
+  await exec("DELETE FROM clients WHERE firm_id=?", [await currentFirmId()]);
 
   // a realistic split: some clients only ever email, some only WhatsApp,
   // some both — which is what the CA described
