@@ -41,6 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         userEmail={user?.email ?? null}
         userName={user?.membership?.full_name ?? null}
         role={user?.membership?.role ?? null}
+        platformAdmin={user?.platformAdmin ?? false}
       />
       <div className="min-w-0 flex-1">
         <TopBar firmName={f.name} city={f.city} />

@@ -32,12 +32,14 @@ export function Sidebar({
   userEmail,
   userName,
   role,
+  platformAdmin,
 }: {
   firmName: string;
   city: string;
   userEmail?: string | null;
   userName?: string | null;
   role?: string | null;
+  platformAdmin?: boolean;
 }) {
   const isActive = useActive();
   return (
@@ -88,6 +90,26 @@ export function Sidebar({
       </div>
 
       <div className="mt-auto px-2.5 pb-1">
+        {platformAdmin ? (
+          <Link
+            href="/admin"
+            aria-current={isActive("/admin") ? "page" : undefined}
+            className={
+              "mb-0.5 flex items-start gap-2.5 rounded-[10px] px-2.5 py-2 transition-colors " +
+              (isActive("/admin") ? "bg-accent-soft" : "hover:bg-surface-2")
+            }
+          >
+            <span className="mt-0.5 shrink-0" style={{ color: "var(--accent)" }}>
+              <TowerIcon />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[13.5px] font-semibold leading-tight" style={{ color: "var(--accent)" }}>
+                Operations
+              </span>
+              <span className="block text-[11px] leading-tight text-ink-3">All firms on Vahi</span>
+            </span>
+          </Link>
+        ) : null}
         <Link
           href={SETTINGS.href}
           aria-current={isActive(SETTINGS.href) ? "page" : undefined}
@@ -256,6 +278,14 @@ function BookIcon() {
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
       <path d="M9 7h7M9 11h5" />
+    </svg>
+  );
+}
+
+function TowerIcon() {
+  return (
+    <svg {...S}>
+      <path d="M12 3v18M8 7h8M6.5 11h11M5 15h14M7 21h10" />
     </svg>
   );
 }
