@@ -29,18 +29,15 @@ corepack pnpm install
 corepack pnpm dev
 ```
 
-The database seeds itself on first load with a demo Hyderabad practice —
-26 clients, ~1,100 filings across a 400-day window, in realistic states of
-completion.
+`pnpm db:seed` loads a demo Hyderabad practice — 26 clients, ~1,700 filings
+across a 400-day window, in realistic states of completion.
 
 ## Stack
 
 - **Next.js 15** (App Router, server actions — no client-side data layer)
-- **Dual-driver storage.** `DATABASE_URL` set → Postgres (Supabase).
-  Unset → SQLite via Node's built-in `node:sqlite`, so local dev needs no
-  external service and no native build. Both paths speak the same SQL subset:
-  `?` placeholders rewritten to `$n`, timestamps generated in JS, booleans
-  coerced for SQLite.
+- **Postgres** (Supabase), reached over the transaction pooler. Queries use
+  `?` placeholders rewritten to `$n`, and timestamps are generated in JS so one
+  operation writes one consistent time across several rows.
 - **Tailwind v4** with CSS-variable tokens, light and dark.
 
 ## Deploying to Supabase + Vercel

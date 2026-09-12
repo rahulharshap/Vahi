@@ -10,8 +10,7 @@ Takes about 15 minutes.
 
 ## 0. Prerequisites
 
-- **Node 22 or newer.** The app uses Node's built-in `node:sqlite` for local
-  development. Check with `node -v`.
+- **Node 22 or newer.** Check with `node -v`.
 - **pnpm.** `corepack enable` gets it, or `npm i -g pnpm`.
 - A **Supabase** account (free tier is fine) and a **Vercel** account.
 
@@ -23,19 +22,19 @@ corepack pnpm install
 
 ---
 
-## 1. Run it locally with no database at all
+## 1. What you will need a database for
 
-This works immediately, before you touch Supabase:
+Vahi talks to Postgres and nothing else. There is no embedded fallback: a
+second driver meant a second schema kept in step by hand, and two schemas
+drift. Creating a Supabase project takes about three minutes and the next
+steps walk through it.
+
+The test suite needs no database and no network — it runs against PGlite,
+which is Postgres compiled to WASM:
 
 ```bash
-corepack pnpm dev
+corepack pnpm test
 ```
-
-Open http://localhost:3000. With no `DATABASE_URL` set, the app uses SQLite in
-`data/vahi.db`, creates the schema on first request, and seeds 26 demo clients
-with roughly 1,700 filings. Nothing to configure.
-
-Use this to see what the app does before wiring anything up.
 
 ---
 

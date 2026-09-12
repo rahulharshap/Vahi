@@ -1,7 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { driver } from "@/lib/db";
-import { seedIfEmpty } from "@/lib/seed";
 
 export const metadata: Metadata = {
   title: "Vahi — compliance command centre",
@@ -18,14 +16,6 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // local SQLite builds and seeds itself; Postgres is seeded by POST /api/seed
-  if (driver === "sqlite") {
-    try {
-      await seedIfEmpty();
-    } catch {
-      // a broken local database must not take the whole app down
-    }
-  }
   return (
     <html lang="en">
       <body>{children}</body>

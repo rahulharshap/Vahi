@@ -1,4 +1,4 @@
-import { q, one, exec, uid, nowISO, insertMany, deleteByIds, driver } from "./db";
+import { q, one, exec, uid, nowISO, insertMany, deleteByIds } from "./db";
 import {
   generateOccurrences,
   iso,
@@ -769,9 +769,8 @@ export async function bulkUpdateFilings(
   updates: Array<{ id: string; status: FilingStatus; docsReceived: string; filedAt: string | null }>,
   chunkSize = 150,
 ): Promise<number> {
-  // Postgres needs the CASE result cast to match the timestamptz column;
-  // SQLite stores it as text and must not see the cast.
-  const tsCast = driver === "postgres" ? "::timestamptz" : "";
+  // the CASE result has to be cast to match the timestamptz column
+  const tsCast = "::timestamptz";
   let n = 0;
   for (let i = 0; i < updates.length; i += chunkSize) {
     const chunk = updates.slice(i, i + chunkSize);

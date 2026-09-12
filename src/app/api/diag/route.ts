@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { q } from "@/lib/db";
-import { driver } from "@/lib/db";
 import { addDays, clientSummaries, dashboard, listFilings, todayISO } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +34,7 @@ export async function GET() {
   );
 
   return NextResponse.json({
-    driver,
+    database: process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : "unset",
     region: process.env.VERCEL_REGION ?? "local",
     coldStart: !globalThis.__vahiWarm,
     ms: t,
