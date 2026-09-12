@@ -74,7 +74,19 @@ export async function reseed(): Promise<boolean> {
   await exec("DELETE FROM filings");
   await exec("DELETE FROM clients WHERE firm_id=?", [FIRM_ID]);
 
-  for (const c of CLIENTS) await createClient(c);
+  // a realistic split: some clients only ever email, some only WhatsApp,
+  // some both — which is what the CA described
+  const slug = (n: string) =>
+    n.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 18);
+  for (let i = 0; i < CLIENTS.length; i++) {
+    const c = CLIENTS[i];
+    const channel = i % 3 === 0 ? "EMAIL" : i % 3 === 1 ? "WHATSAPP" : "BOTH";
+    const email =
+      channel === "WHATSAPP" && i % 6 !== 1
+        ? null
+        : (c.contactName ?? "accounts").split(" ")[0].toLowerCase() + "@" + slug(c.name) + ".example.in";
+    await createClient({ ...c, channel, email });
+  }
 
   const today = todayISO();
   await syncAllFilings(addDays(today, -220), addDays(today, 200));

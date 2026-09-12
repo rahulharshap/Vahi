@@ -1,5 +1,6 @@
 import type { ClientRow } from "@/lib/store";
 import { ENTITY_LABEL, type EntityType, type GstScheme } from "@/lib/compliance";
+import type { Channel } from "@/lib/store";
 
 const ENTITIES: EntityType[] = ["PROPRIETOR", "PARTNERSHIP", "LLP", "PVT_LTD", "TRUST", "INDIVIDUAL"];
 const SCHEMES: Array<{ v: GstScheme; l: string }> = [
@@ -9,6 +10,11 @@ const SCHEMES: Array<{ v: GstScheme; l: string }> = [
   { v: "COMPOSITION", l: "Composition" },
 ];
 const STATES = ["Telangana", "Andhra Pradesh", "Karnataka", "Tamil Nadu", "Maharashtra", "Other"];
+const CHANNELS: Array<{ v: Channel; l: string; hint: string }> = [
+  { v: "WHATSAPP", l: "WhatsApp", hint: "Chases go to the number below" },
+  { v: "EMAIL", l: "Email", hint: "Replies with attachments file themselves" },
+  { v: "BOTH", l: "Both", hint: "Sent on both channels" },
+];
 
 export default function ClientForm({
   action,
@@ -145,6 +151,31 @@ export default function ClientForm({
               placeholder="+919848012345"
               className="field font-mono"
             />
+          </div>
+          <div>
+            <label className="label" htmlFor="email">
+              Email
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              defaultValue={client?.email ?? ""}
+              placeholder="ravi@srilakshmitraders.com"
+              className="field"
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="channel">
+              How they send documents
+            </label>
+            <select id="channel" name="channel" defaultValue={client?.channel ?? "WHATSAPP"} className="field">
+              {CHANNELS.map((c) => (
+                <option key={c.v} value={c.v}>
+                  {c.l} — {c.hint}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </fieldset>

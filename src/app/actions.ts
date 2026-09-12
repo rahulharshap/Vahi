@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   addDays,
+  assignDocument,
   createClient,
   deleteClient,
   dueStage,
+  getClient,
   getFiling,
   listFilings,
   pendingChases,
@@ -24,9 +26,11 @@ import {
   type ClientInput,
   type FilingStatus,
 } from "@/lib/store";
-import { composeChase, dispatch, type Stage } from "@/lib/whatsapp";
+import { composeChase, type Stage } from "@/lib/whatsapp";
+import { buildDeliveries, channelsFor, deliver } from "@/lib/notify";
 import { reseed } from "@/lib/seed";
 import type { EntityType, GstScheme } from "@/lib/compliance";
+import type { Channel } from "@/lib/store";
 
 function refresh() {
   revalidatePath("/", "layout");
@@ -46,6 +50,8 @@ function parseClient(fd: FormData): ClientInput {
     state: String(fd.get("state") ?? "Telangana"),
     contactName: (String(fd.get("contactName") ?? "").trim() || null) as string | null,
     contactPhone: (String(fd.get("contactPhone") ?? "").trim() || null) as string | null,
+    email: (String(fd.get("email") ?? "").trim().toLowerCase() || null) as string | null,
+    channel: String(fd.get("channel") ?? "WHATSAPP") as Channel,
   };
 }
 
@@ -109,7 +115,10 @@ export async function reseedAction() {
 export async function sendChaseAction(filingId: string, stage: Stage) {
   const f = await getFiling(filingId);
   if (!f) return;
-  const body = composeChase(stage, {
+  const client = await getClient(f.client_id);
+  if (!client) return;
+
+  const ctx = {
     clientName: f.clientName,
     contactName: f.contactName,
     filingTitle: f.title,
@@ -118,15 +127,33 @@ export async function sendChaseAction(filingId: string, stage: Stage) {
     docsOutstanding: f.docsOutstanding,
     firmName: (await firm()).name,
     penaltyNote: f.penalty_note,
-  });
-  let status = "SENT";
-  try {
-    const res = await dispatch(f.contactPhone ?? "", body);
-    status = res.note ? "RECORDED" : "SENT";
-  } catch {
-    status = "FAILED";
+  };
+
+  const deliveries = buildDeliveries(
+    channelsFor(client),
+    stage,
+    ctx,
+    { phone: client.contact_phone, email: client.email },
+    f.id,
+  );
+
+  // a client with no usable address still gets a recorded attempt, so the
+  // gap shows up in the history rather than disappearing
+  if (deliveries.length === 0) {
+    await recordMessage(f.id, f.client_id, stage, composeChase(stage, ctx), "NO_ADDRESS", "WHATSAPP");
+    refresh();
+    return;
   }
-  await recordMessage(f.id, f.client_id, stage, body, status);
+
+  for (const d of deliveries) {
+    let status: string;
+    try {
+      status = (await deliver(d)).status;
+    } catch {
+      status = "FAILED";
+    }
+    await recordMessage(f.id, f.client_id, stage, d.body, status, d.channel);
+  }
   refresh();
 }
 
@@ -168,5 +195,13 @@ export async function setAssigneeAction(filingId: string, fd: FormData) {
 
 export async function setNotesAction(filingId: string, fd: FormData) {
   await setNotes(filingId, String(fd.get("notes") ?? ""));
+  refresh();
+}
+
+export async function assignDocumentAction(documentId: string, fd: FormData) {
+  const target = String(fd.get("target") ?? "");
+  const [filingId, docLabel] = target.split("::");
+  if (!filingId) return;
+  await assignDocument(documentId, filingId, docLabel || null);
   refresh();
 }

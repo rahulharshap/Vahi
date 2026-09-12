@@ -106,7 +106,39 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_filing ON messages(filing_id);
+
+CREATE TABLE IF NOT EXISTS documents (
+  id            TEXT PRIMARY KEY,
+  firm_id       TEXT NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+  filing_id     TEXT REFERENCES filings(id) ON DELETE SET NULL,
+  client_id     TEXT REFERENCES clients(id) ON DELETE SET NULL,
+  doc_label     TEXT,
+  file_name     TEXT NOT NULL,
+  content_type  TEXT,
+  size_bytes    INTEGER,
+  storage_path  TEXT,
+  source        TEXT NOT NULL DEFAULT 'EMAIL',
+  from_address  TEXT,
+  subject       TEXT,
+  matched_by    TEXT,
+  received_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_documents_filing ON documents(filing_id);
+CREATE INDEX IF NOT EXISTS idx_documents_firm_received ON documents(firm_id, received_at DESC);
 `;
+
+/**
+ * Additive column changes for an existing local database.
+ *
+ * SQLite has no `ADD COLUMN IF NOT EXISTS`, and a developer who has been
+ * running the app should not have to delete their database to pick up a new
+ * field. Each statement is attempted and a duplicate-column error ignored.
+ * Postgres gets the same changes through supabase/migrations.
+ */
+const SQLITE_ALTERS = [
+  "ALTER TABLE clients ADD COLUMN email TEXT",
+  "ALTER TABLE clients ADD COLUMN channel TEXT NOT NULL DEFAULT 'WHATSAPP'",
+];
 
 type SqliteHandle = {
   prepare: (sql: string) => { all: (...p: unknown[]) => unknown[]; run: (...p: unknown[]) => unknown };
@@ -133,6 +165,13 @@ async function sqlite(): Promise<SqliteHandle> {
   handle.exec("PRAGMA journal_mode = WAL;");
   handle.exec("PRAGMA foreign_keys = ON;");
   handle.exec(SQLITE_SCHEMA);
+  for (const stmt of SQLITE_ALTERS) {
+    try {
+      handle.exec(stmt);
+    } catch {
+      // column already present
+    }
+  }
   _sqlite = handle;
   return handle;
 }

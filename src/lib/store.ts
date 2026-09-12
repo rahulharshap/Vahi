@@ -42,8 +42,19 @@ export interface ClientRow {
   state: string;
   contact_name: string | null;
   contact_phone: string | null;
+  email: string | null;
+  channel: Channel;
   active: boolean | number;
 }
+
+/** How a client sends and receives. Varies per client; the firm does not choose. */
+export type Channel = "WHATSAPP" | "EMAIL" | "BOTH";
+
+export const CHANNEL_LABEL: Record<Channel, string> = {
+  WHATSAPP: "WhatsApp",
+  EMAIL: "Email",
+  BOTH: "WhatsApp and email",
+};
 
 export interface FilingRow {
   id: string;
@@ -259,6 +270,8 @@ export interface ClientInput {
   state: string;
   contactName?: string | null;
   contactPhone?: string | null;
+  email?: string | null;
+  channel?: Channel;
 }
 
 export async function createClient(input: ClientInput): Promise<string> {
@@ -266,8 +279,9 @@ export async function createClient(input: ClientInput): Promise<string> {
   await exec(
     `INSERT INTO clients
       (id, firm_id, name, entity_type, pan, gstin, gst_scheme, tds_deductor,
-       has_employees, tax_audit, director_count, state, contact_name, contact_phone, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       has_employees, tax_audit, director_count, state, contact_name, contact_phone,
+       email, channel, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       id,
       FIRM_ID,
@@ -283,6 +297,8 @@ export async function createClient(input: ClientInput): Promise<string> {
       input.state,
       input.contactName ?? null,
       input.contactPhone ?? null,
+      input.email ?? null,
+      input.channel ?? "WHATSAPP",
       nowISO(),
     ],
   );
@@ -293,7 +309,7 @@ export async function updateClient(id: string, input: ClientInput): Promise<void
   await exec(
     `UPDATE clients SET name=?, entity_type=?, pan=?, gstin=?, gst_scheme=?,
        tds_deductor=?, has_employees=?, tax_audit=?, director_count=?, state=?,
-       contact_name=?, contact_phone=? WHERE id=?`,
+       contact_name=?, contact_phone=?, email=?, channel=? WHERE id=?`,
     [
       input.name,
       input.entityType,
@@ -307,6 +323,8 @@ export async function updateClient(id: string, input: ClientInput): Promise<void
       input.state,
       input.contactName ?? null,
       input.contactPhone ?? null,
+      input.email ?? null,
+      input.channel ?? "WHATSAPP",
       id,
     ],
   );
@@ -570,11 +588,13 @@ export async function recordMessage(
   stage: Stage,
   body: string,
   status: string,
+  channel: "WHATSAPP" | "EMAIL" = "WHATSAPP",
 ): Promise<void> {
   const ts = nowISO();
   await exec(
-    "INSERT INTO messages (id, filing_id, client_id, stage, body, status, sent_at, created_at) VALUES (?,?,?,?,?,?,?,?)",
-    [uid("msg"), filingId, clientId, stage, body, status, ts, ts],
+    `INSERT INTO messages (id, filing_id, client_id, stage, channel, body, status, sent_at, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [uid("msg"), filingId, clientId, stage, channel, body, status, ts, ts],
   );
 }
 
@@ -830,4 +850,138 @@ export async function assignees(): Promise<string[]> {
     [FIRM_ID],
   );
   return rows.map((r) => r.assignee);
+}
+
+// ---------------------------------------------------------------- documents
+
+export interface DocumentRow {
+  id: string;
+  firm_id: string;
+  filing_id: string | null;
+  client_id: string | null;
+  doc_label: string | null;
+  file_name: string;
+  content_type: string | null;
+  size_bytes: number | null;
+  storage_path: string | null;
+  source: "EMAIL" | "WHATSAPP" | "UPLOAD";
+  from_address: string | null;
+  subject: string | null;
+  matched_by: "TOKEN" | "SENDER" | "FILENAME" | "MANUAL" | null;
+  received_at: string;
+}
+
+export async function recordDocument(doc: {
+  filingId: string | null;
+  clientId: string | null;
+  docLabel: string | null;
+  fileName: string;
+  contentType?: string | null;
+  sizeBytes?: number | null;
+  storagePath?: string | null;
+  source: DocumentRow["source"];
+  fromAddress?: string | null;
+  subject?: string | null;
+  matchedBy: DocumentRow["matched_by"];
+}): Promise<string> {
+  const id = uid("doc");
+  await exec(
+    `INSERT INTO documents
+      (id, firm_id, filing_id, client_id, doc_label, file_name, content_type,
+       size_bytes, storage_path, source, from_address, subject, matched_by, received_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      id,
+      FIRM_ID,
+      doc.filingId,
+      doc.clientId,
+      doc.docLabel,
+      doc.fileName,
+      doc.contentType ?? null,
+      doc.sizeBytes ?? null,
+      doc.storagePath ?? null,
+      doc.source,
+      doc.fromAddress ?? null,
+      doc.subject ?? null,
+      doc.matchedBy,
+      nowISO(),
+    ],
+  );
+  return id;
+}
+
+/** Documents that arrived but could not be placed. The morning triage screen. */
+export async function unmatchedDocuments(): Promise<DocumentRow[]> {
+  return q<DocumentRow>(
+    "SELECT * FROM documents WHERE firm_id = ? AND filing_id IS NULL ORDER BY received_at DESC",
+    [FIRM_ID],
+  );
+}
+
+export async function documentsForFiling(filingId: string): Promise<DocumentRow[]> {
+  return q<DocumentRow>(
+    "SELECT * FROM documents WHERE filing_id = ? ORDER BY received_at DESC",
+    [filingId],
+  );
+}
+
+/** Attach an unmatched document to a filing and tick its checklist entry. */
+export async function assignDocument(documentId: string, filingId: string, docLabel: string | null) {
+  await exec("UPDATE documents SET filing_id=?, doc_label=?, matched_by='MANUAL' WHERE id=? AND firm_id=?", [
+    filingId,
+    docLabel,
+    documentId,
+    FIRM_ID,
+  ]);
+  if (docLabel) await markDocReceived(filingId, docLabel);
+}
+
+/** Tick one required document off, without un-ticking on a repeat delivery. */
+export async function markDocReceived(filingId: string, doc: string): Promise<void> {
+  const row = await one<{ docs_received: string; docs_required: string }>(
+    "SELECT docs_received, docs_required FROM filings WHERE id=?",
+    [filingId],
+  );
+  if (!row) return;
+  const received: string[] = JSON.parse(row.docs_received || "[]");
+  if (received.includes(doc)) return;
+  const required: string[] = JSON.parse(row.docs_required || "[]");
+  const next = [...received, doc];
+  const allIn = required.length > 0 && required.every((d) => next.includes(d));
+  await exec(
+    `UPDATE filings SET docs_received=?,
+       status = CASE WHEN status IN ('AWAITING_DOCS','DOCS_RECEIVED') THEN ? ELSE status END
+     WHERE id=?`,
+    [JSON.stringify(next), allIn ? "DOCS_RECEIVED" : "AWAITING_DOCS", filingId],
+  );
+}
+
+/** Open filings a newly arrived document could plausibly belong to. */
+export async function matchCandidates(clientId?: string): Promise<
+  Array<{ id: string; clientId: string; docsOutstanding: string[]; title: string; periodLabel: string }>
+> {
+  const today = todayISO();
+  const rows = await listFilings({
+    clientId,
+    from: addDays(today, -CHASE_LOOKBACK_DAYS * 2),
+    to: addDays(today, 60),
+    openOnly: true,
+  });
+  return rows.map((f) => ({
+    id: f.id,
+    clientId: f.client_id,
+    docsOutstanding: f.docsOutstanding,
+    title: f.title,
+    periodLabel: f.period_label,
+  }));
+}
+
+/** Find a client by an inbound email address. */
+export async function clientByEmail(address: string): Promise<ClientRow | undefined> {
+  const clean = address.toLowerCase().replace(/^.*</, "").replace(/>.*$/, "").trim();
+  if (!clean) return undefined;
+  return one<ClientRow>("SELECT * FROM clients WHERE firm_id = ? AND LOWER(COALESCE(email,'')) = ?", [
+    FIRM_ID,
+    clean,
+  ]);
 }

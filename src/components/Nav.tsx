@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/board", label: "Board", hint: "What needs attention", icon: BoardIcon },
   { href: "/calendar", label: "Calendar", hint: "Every statutory date", icon: CalendarIcon },
   { href: "/chases", label: "Chases", hint: "Documents to collect", icon: ChatIcon },
+  { href: "/inbox", label: "Inbox", hint: "Documents to place", icon: InboxIcon },
   { href: "/clients", label: "Clients", hint: "The roster", icon: PeopleIcon },
 ];
 
@@ -108,7 +109,7 @@ export function BottomTabs() {
   const isActive = useActive();
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-[color:var(--surface)]/95 backdrop-blur-md lg:hidden">
-      <div className="mx-auto grid max-w-lg grid-cols-4">
+      <div className="mx-auto grid max-w-lg grid-cols-5">
         {LINKS.map((l) => {
           const active = isActive(l.href);
           const Icon = l.icon;
@@ -181,6 +182,15 @@ function ChatIcon() {
     </svg>
   );
 }
+function InboxIcon() {
+  return (
+    <svg {...S}>
+      <path d="M3 13h4l1.5 3h7L17 13h4" />
+      <path d="M4.5 5.5 3 13v5a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-5l-1.5-7.5A1 1 0 0 0 18.5 5h-13a1 1 0 0 0-1 .5Z" />
+    </svg>
+  );
+}
+
 function PeopleIcon() {
   return (
     <svg {...S}>
