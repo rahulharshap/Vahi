@@ -280,6 +280,46 @@ immediate, which is easier while testing.
 moment one membership exists; after that, joining requires an invitation from
 Settings → Your team.
 
+### Operating the platform
+
+There are three levels of authority, deliberately distinct:
+
+| | Can |
+| --- | --- |
+| **Platform admin** | create firms, set their seat limits, suspend them |
+| **Firm owner** | run one practice — invite staff, edit templates, settings |
+| **Staff** | do the work |
+
+A firm owner must never reach another firm's data, and being a platform admin
+is a separate decision from owning a firm — otherwise the first customer's
+owner account would carry the keys to every other customer.
+
+Grant the first operator by listing their address:
+
+```ini
+PLATFORM_ADMIN_EMAILS=you@yourdomain.in
+```
+
+That variable exists to solve the bootstrap — the first operator cannot be
+granted through a page only operators can open — which is why it belongs in the
+host environment and not the database.
+
+The console is at **/admin**. Creating a firm there does *not* create a user
+account: the owner is invited by email and signs up themselves, so no password
+is minted by one person and handed to another, and they verify their own
+address.
+
+### Seat limits
+
+Each firm has an optional `max_members`. Blank means unlimited, which is the
+right default — adding a limit later must never retroactively lock out a firm
+that already has more people than the new cap.
+
+Enforced in two places: when an invitation is created, and again when a
+membership is created. Both, because an invitation issued while a seat was free
+could otherwise be claimed after the last one had gone, and only the check at
+claim time is authoritative.
+
 ## What is deliberately not built
 - **WhatsApp delivery.** Chase messages are composed and recorded, not sent,
   unless `WA_PROVIDER` is set and an adapter is written in

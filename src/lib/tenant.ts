@@ -245,3 +245,83 @@ export async function firmFromApiKey(
   exec("UPDATE api_keys SET last_used_at = ? WHERE id = ?", [nowISO(), row.id]).catch(() => {});
   return { firmId: row.firm_id, keyId: row.id, scopes: row.scopes };
 }
+
+// ------------------------------------------------------- platform: firms
+
+export interface FirmSummary extends Firm {
+  members: number;
+  invites: number;
+  clients: number;
+  filings: number;
+  maxMembers: number | null;
+}
+
+/** Every firm with the numbers an operator actually needs. */
+export async function firmSummaries(): Promise<FirmSummary[]> {
+  return q<FirmSummary>(
+    `SELECT f.id, f.name, f.city, f.slug, f.timezone, f.active,
+            s.max_members AS "maxMembers",
+            (SELECT COUNT(*) FROM memberships m WHERE m.firm_id = f.id) AS members,
+            (SELECT COUNT(*) FROM invitations i WHERE i.firm_id = f.id AND i.claimed_at IS NULL) AS invites,
+            (SELECT COUNT(*) FROM clients c WHERE c.firm_id = f.id) AS clients,
+            (SELECT COUNT(*) FROM filings fl JOIN clients c2 ON c2.id = fl.client_id WHERE c2.firm_id = f.id) AS filings
+       FROM firms f LEFT JOIN firm_settings s ON s.firm_id = f.id
+      ORDER BY f.created_at ASC`,
+  );
+}
+
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "firm"
+  );
+}
+
+/**
+ * Create a tenant.
+ *
+ * Deliberately does NOT create any user account. The owner signs up
+ * themselves against the invitation, so no password is ever minted by one
+ * person and handed to another, and the owner verifies their own address.
+ */
+export async function createFirm(input: {
+  name: string;
+  city: string;
+  timezone?: string;
+  maxMembers?: number | null;
+}): Promise<string> {
+  const id = uid("firm");
+  let slug = slugify(input.name);
+  const taken = await one<{ id: string }>("SELECT id FROM firms WHERE slug = ?", [slug]);
+  if (taken) slug = slug + "-" + id.slice(-4);
+
+  await exec("INSERT INTO firms (id, name, city, slug, timezone, created_at) VALUES (?,?,?,?,?,?)", [
+    id,
+    input.name.trim(),
+    input.city.trim(),
+    slug,
+    input.timezone ?? "Asia/Kolkata",
+    nowISO(),
+  ]);
+  await exec("INSERT INTO firm_settings (firm_id, max_members, updated_at) VALUES (?,?,?)", [
+    id,
+    input.maxMembers ?? null,
+    nowISO(),
+  ]);
+  return id;
+}
+
+export async function setFirmActive(firmId: string, active: boolean): Promise<void> {
+  await exec("UPDATE firms SET active = ? WHERE id = ?", [active, firmId]);
+}
+
+export async function setMaxMembers(firmId: string, max: number | null): Promise<void> {
+  await exec("UPDATE firm_settings SET max_members = ?, updated_at = ? WHERE firm_id = ?", [
+    max,
+    nowISO(),
+    firmId,
+  ]);
+}

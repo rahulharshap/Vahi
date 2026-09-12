@@ -299,14 +299,23 @@ export async function resetTemplateAction(channel: "WHATSAPP" | "EMAIL", stage: 
 
 // ---------------------------------------------------------------- members
 
-import { inviteToFirm, revokeInvitation, type Role } from "@/lib/auth";
+import { inviteToFirm, revokeInvitation, SeatLimitReached, type Role } from "@/lib/auth";
 
 export async function inviteMemberAction(fd: FormData) {
   const email = String(fd.get("inviteEmail") ?? "").trim().toLowerCase();
   const role = String(fd.get("inviteRole") ?? "staff") as Role;
   if (!email) return;
   const firmId = await currentFirmId();
-  await inviteToFirm(firmId, email, role, "ui");
+  try {
+    await inviteToFirm(firmId, email, role, "ui");
+  } catch (e) {
+    if (e instanceof SeatLimitReached) {
+      // surfaced on the settings page rather than thrown at the user as a
+      // stack trace: running out of seats is a normal state, not a fault
+      redirect("/settings?seats=" + encodeURIComponent(e.message));
+    }
+    throw e;
+  }
   await audit({ action: "member.invited", entity: "invitation", detail: { email, role } });
   refresh();
 }

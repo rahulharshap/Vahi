@@ -3,22 +3,23 @@ import { currentFirmId, getFirm, getSettings, listApiKeys } from "@/lib/tenant";
 import { INTAKE_DOMAIN } from "@/lib/intake";
 import { SectionHead, prettyDate } from "@/components/ui";
 import { createApiKeyAction, inviteMemberAction, revokeApiKeyAction, revokeInviteAction, saveFirmAction } from "@/app/actions";
-import { authConfigured, membershipsOf, openInvitations } from "@/lib/auth";
+import { authConfigured, membershipsOf, openInvitations, seatUsage } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function Settings({
   searchParams,
 }: {
-  searchParams: Promise<{ created?: string }>;
+  searchParams: Promise<{ created?: string; seats?: string }>;
 }) {
-  const { created } = await searchParams;
+  const { created, seats: seatError } = await searchParams;
   const firmId = await currentFirmId();
   const firm = await getFirm(firmId);
   const s = await getSettings(firmId);
   const keys = await listApiKeys(firmId);
   const members = authConfigured() ? await membershipsOf(firmId) : [];
   const invites = authConfigured() ? await openInvitations(firmId) : [];
+  const seats = await seatUsage(firmId);
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -193,7 +194,26 @@ export default async function Settings({
       </form>
 
       <section className="card p-4">
-        <SectionHead title="Your team" count={members.length} />
+        <SectionHead
+          title="Your team"
+          count={members.length}
+          action={
+            <span className="tnum text-[11px] text-ink-3">
+              {seats.limit === null
+                ? "no seat limit"
+                : seats.used + " of " + seats.limit + " seats used"}
+            </span>
+          }
+        />
+        {seatError ? (
+          <p
+            role="alert"
+            className="mb-3 rounded-lg px-3 py-2 text-[12.5px]"
+            style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
+          >
+            {seatError}
+          </p>
+        ) : null}
         {!authConfigured() ? (
           <p
             className="rounded-lg px-3 py-2 text-[12.5px] leading-snug"
@@ -260,7 +280,7 @@ export default async function Settings({
                   <option value="owner">Owner</option>
                 </select>
               </div>
-              <button className="btn" type="submit">
+              <button className="btn" type="submit" disabled={seats.free === 0}>
                 Invite
               </button>
             </form>

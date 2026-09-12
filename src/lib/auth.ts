@@ -31,6 +31,8 @@ export interface SessionUser {
   id: string;
   email: string;
   membership: Membership | null;
+  /** Operates Vahi itself — creates firms, sets their limits. */
+  platformAdmin: boolean;
 }
 
 export function authConfigured(): boolean {
@@ -72,8 +74,33 @@ export async function currentUser(): Promise<SessionUser | null> {
   // cookie the browser could have edited
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) return null;
+  const email = data.user.email ?? "";
   const membership = await membershipFor(data.user.id);
-  return { id: data.user.id, email: data.user.email ?? "", membership };
+  return {
+    id: data.user.id,
+    email,
+    membership,
+    platformAdmin: await isPlatformAdmin(data.user.id, email),
+  };
+}
+
+/**
+ * Platform administrators.
+ *
+ * Two sources, and the env var exists to solve the bootstrap: the first
+ * platform admin cannot be granted through a UI that only platform admins can
+ * reach. Listing an address in PLATFORM_ADMIN_EMAILS makes whoever signs up
+ * with it an operator — which is why that variable belongs in the host's
+ * environment and not in the database.
+ */
+export async function isPlatformAdmin(userId: string, email: string): Promise<boolean> {
+  const allowed = (process.env.PLATFORM_ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (email && allowed.includes(email.toLowerCase())) return true;
+  const row = await one<{ user_id: string }>("SELECT user_id FROM platform_admins WHERE user_id = ?", [userId]);
+  return Boolean(row);
 }
 
 export async function membershipFor(userId: string): Promise<Membership | null> {
@@ -144,6 +171,20 @@ export async function joinFirm(userId: string, email: string, fullName?: string)
     return null;
   }
 
+  // Checked again here because an invitation issued while a seat was free can
+  // be claimed after the last one has gone. Members are counted without the
+  // pending invitations, since this user is about to consume theirs.
+  const limitRow = await one<{ max_members: number | null; members: number | string }>(
+    `SELECT (SELECT max_members FROM firm_settings WHERE firm_id = ?) AS max_members,
+            (SELECT COUNT(*) FROM memberships WHERE firm_id = ?) AS members`,
+    [firmId, firmId],
+  );
+  const max = limitRow?.max_members ?? null;
+  if (max !== null && Number(limitRow?.members ?? 0) >= max) {
+    logger.warn("auth.seat_limit", { userId, firmId, max });
+    return null;
+  }
+
   const id = uid("mem");
   await exec(
     "INSERT INTO memberships (id, user_id, firm_id, role, full_name, created_at) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
@@ -155,7 +196,33 @@ export async function joinFirm(userId: string, email: string, fullName?: string)
   return membershipFor(userId);
 }
 
+/**
+ * Seats used and allowed. Pending invitations count as used: a seat promised
+ * to someone is not a seat you still have.
+ */
+export async function seatUsage(firmId: string): Promise<{ used: number; limit: number | null; free: number | null }> {
+  const row = await one<{ members: number | string; invites: number | string; max_members: number | null }>(
+    `SELECT
+       (SELECT COUNT(*) FROM memberships WHERE firm_id = ?) AS members,
+       (SELECT COUNT(*) FROM invitations WHERE firm_id = ? AND claimed_at IS NULL) AS invites,
+       (SELECT max_members FROM firm_settings WHERE firm_id = ?) AS max_members`,
+    [firmId, firmId, firmId],
+  );
+  const used = Number(row?.members ?? 0) + Number(row?.invites ?? 0);
+  const limit = row?.max_members ?? null;
+  return { used, limit, free: limit === null ? null : Math.max(0, limit - used) };
+}
+
+export class SeatLimitReached extends Error {
+  constructor(limit: number) {
+    super("This firm's plan allows " + limit + " " + (limit === 1 ? "person" : "people") + ". Remove someone, or raise the limit.");
+    this.name = "SeatLimitReached";
+  }
+}
+
 export async function inviteToFirm(firmId: string, email: string, role: Role, invitedBy: string) {
+  const seats = await seatUsage(firmId);
+  if (seats.limit !== null && seats.free === 0) throw new SeatLimitReached(seats.limit);
   await exec(
     `INSERT INTO invitations (id, firm_id, email, role, invited_by, created_at)
      VALUES (?,?,?,?,?,?)

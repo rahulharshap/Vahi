@@ -82,6 +82,67 @@ const rls = await db.query(
 );
 check("RLS enabled on all four tables", rls.rows.every((r) => r.relrowsecurity), JSON.stringify(rls.rows.map((r) => r.relname + "=" + r.relrowsecurity)));
 
+// ------------------------------------------------------- tenancy and seats
+console.log("");
+console.log("--- tenancy ---");
+check("platform_admins exists", cols.rows.some((r) => r.table_name === "platform_admins"));
+check(
+  "memberships links a user to a firm",
+  ["user_id", "firm_id", "role"].every((c) =>
+    cols.rows.some((r) => r.table_name === "memberships" && r.column_name === c),
+  ),
+);
+check("firm_settings carries a seat limit", typeOf("firm_settings", "max_members") === "integer", String(typeOf("firm_settings", "max_members")));
+
+await db.exec("insert into firms (id, name, city, slug) values ('firm_seats','Seat Test','Hyderabad','seat-test')");
+await db.exec("insert into firm_settings (firm_id, max_members) values ('firm_seats', 2)");
+
+// a limit below one would lock a firm out of itself
+try {
+  await db.exec("update firm_settings set max_members = 0 where firm_id = 'firm_seats'");
+  check("a zero seat limit is rejected", false, "accepted");
+} catch {
+  check("a zero seat limit is rejected", true);
+}
+
+// null is unlimited, and must stay allowed: adding limits later must never
+// retroactively lock out a firm that already has more people than the new cap
+try {
+  await db.exec("update firm_settings set max_members = null where firm_id = 'firm_seats'");
+  check("null means unlimited", true);
+} catch (e) {
+  check("null means unlimited", false, e.message);
+}
+
+await db.exec("insert into auth.users (id, email) values ('11111111-1111-1111-1111-111111111111','a@b.test')");
+try {
+  await db.exec("insert into memberships (id, user_id, firm_id, role) values ('mem_x','11111111-1111-1111-1111-111111111111','firm_seats','superuser')");
+  check("an unknown membership role is rejected", false, "accepted");
+} catch {
+  check("an unknown membership role is rejected", true);
+}
+
+await db.exec("insert into memberships (id, user_id, firm_id, role) values ('mem_ok','11111111-1111-1111-1111-111111111111','firm_seats','owner')");
+const seated = await db.query("select count(*) n from memberships where firm_id = 'firm_seats'");
+check("a valid membership stores", Number(seated.rows[0].n) === 1);
+
+try {
+  await db.exec("insert into memberships (id, user_id, firm_id, role) values ('mem_dupe','11111111-1111-1111-1111-111111111111','firm_seats','staff')");
+  check("one membership per user per firm", false, "duplicate accepted");
+} catch {
+  check("one membership per user per firm", true);
+}
+
+// an open invitation is unique per (firm, email); a second would let one seat
+// be claimed twice
+await db.exec("insert into invitations (id, firm_id, email) values ('inv_1','firm_seats','kiran@firm.test')");
+try {
+  await db.exec("insert into invitations (id, firm_id, email) values ('inv_2','firm_seats','KIRAN@firm.test')");
+  check("a duplicate open invitation is rejected, case-insensitively", false, "accepted");
+} catch {
+  check("a duplicate open invitation is rejected, case-insensitively", true);
+}
+
 // ------------------------------------------ the app's own queries, verbatim
 let ph = 0;
 const toPg = (sql) => ((ph = 0), sql.replace(/\?/g, () => "$" + ++ph));
