@@ -12,7 +12,8 @@
     "test": "node tests/compliance.test.mjs && node tests/intake.test.mjs && node tests/api.test.mjs && node tests/postgres.test.mjs",
     "test:rules": "node tests/compliance.test.mjs",
     "test:intake": "node tests/intake.test.mjs",
-    "test:api": "node tests/api.test.mjs"
+    "test:api": "node tests/api.test.mjs",
+    "verify:membership": "node --env-file=.env.local scripts/verify-membership.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
