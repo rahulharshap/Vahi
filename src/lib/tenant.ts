@@ -77,8 +77,21 @@ let cachedFirmId: string | null = null;
  * a second firm is onboarded — which is exactly when auth has to exist.
  */
 export async function currentFirmId(): Promise<string> {
+  // an API request carries its firm explicitly
   const ctx = scope.getStore();
   if (ctx) return ctx.firmId;
+
+  // a browser request takes it from the signed-in user's membership. Imported
+  // lazily because this module is also used outside a request, where
+  // next/headers does not exist.
+  try {
+    const { currentUser } = await import("./auth");
+    const user = await currentUser();
+    if (user?.membership) return user.membership.firm_id;
+  } catch {
+    // no request context, or auth is not configured
+  }
+
   if (process.env.DEFAULT_FIRM_ID) return process.env.DEFAULT_FIRM_ID;
   if (cachedFirmId) return cachedFirmId;
   const row = await one<{ id: string }>(

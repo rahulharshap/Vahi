@@ -254,14 +254,33 @@ times out, seed from your machine against the deployed URL instead — the
 
 ---
 
-## What is deliberately not built
+## Turning authentication on
 
-- **Authentication.** There is none. `FIRM_ID` is a constant in
-  `src/lib/store.ts` and anyone with the URL sees everything. Fine for a demo;
-  not fine for a real firm's client list. `0002_rls.sql` enables row-level
-  security with no policies and revokes the `anon` and `authenticated` roles,
-  so the database is not exposed through Supabase's HTTP API — but the app
-  itself has no login.
+Vahi uses Supabase Auth. **With it unconfigured the app runs as a single open
+tenant** — anyone with the link has full access. That is deliberate, so a demo
+works with no setup, and it is not acceptable once real client data is in
+there.
+
+To switch it on, add both to `.env.local` and to Vercel:
+
+```ini
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable key>
+```
+
+Both are public. The URL is a hostname and the publishable key is designed to
+ship to browsers; RLS and the revokes in `0002` and `0005` mean it can read
+nothing on its own.
+
+Then, in the Supabase dashboard under **Authentication → Providers**, make sure
+Email is enabled. Turning **Confirm email** off makes the first sign-up
+immediate, which is easier while testing.
+
+**The first account created becomes the firm's owner.** That door closes the
+moment one membership exists; after that, joining requires an invitation from
+Settings → Your team.
+
+## What is deliberately not built
 - **WhatsApp delivery.** Chase messages are composed and recorded, not sent,
   unless `WA_PROVIDER` is set and an adapter is written in
   `src/lib/whatsapp.ts`. Sending needs a Business Solution Provider account

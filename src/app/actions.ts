@@ -296,3 +296,23 @@ export async function resetTemplateAction(channel: "WHATSAPP" | "EMAIL", stage: 
   await resetTemplate(await currentFirmId(), channel, stage as never);
   refresh();
 }
+
+// ---------------------------------------------------------------- members
+
+import { inviteToFirm, revokeInvitation, type Role } from "@/lib/auth";
+
+export async function inviteMemberAction(fd: FormData) {
+  const email = String(fd.get("inviteEmail") ?? "").trim().toLowerCase();
+  const role = String(fd.get("inviteRole") ?? "staff") as Role;
+  if (!email) return;
+  const firmId = await currentFirmId();
+  await inviteToFirm(firmId, email, role, "ui");
+  await audit({ action: "member.invited", entity: "invitation", detail: { email, role } });
+  refresh();
+}
+
+export async function revokeInviteAction(id: string) {
+  await revokeInvitation(await currentFirmId(), id);
+  await audit({ action: "invitation.revoked", entity: "invitation", entityId: id });
+  refresh();
+}

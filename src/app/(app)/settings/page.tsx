@@ -2,7 +2,8 @@ import Link from "next/link";
 import { currentFirmId, getFirm, getSettings, listApiKeys } from "@/lib/tenant";
 import { INTAKE_DOMAIN } from "@/lib/intake";
 import { SectionHead, prettyDate } from "@/components/ui";
-import { createApiKeyAction, revokeApiKeyAction, saveFirmAction } from "@/app/actions";
+import { createApiKeyAction, inviteMemberAction, revokeApiKeyAction, revokeInviteAction, saveFirmAction } from "@/app/actions";
+import { authConfigured, membershipsOf, openInvitations } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,8 @@ export default async function Settings({
   const firm = await getFirm(firmId);
   const s = await getSettings(firmId);
   const keys = await listApiKeys(firmId);
+  const members = authConfigured() ? await membershipsOf(firmId) : [];
+  const invites = authConfigured() ? await openInvitations(firmId) : [];
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -188,6 +191,86 @@ export default async function Settings({
           </Link>
         </div>
       </form>
+
+      <section className="card p-4">
+        <SectionHead title="Your team" count={members.length} />
+        {!authConfigured() ? (
+          <p
+            className="rounded-lg px-3 py-2 text-[12.5px] leading-snug"
+            style={{ background: "var(--warn-soft)", color: "var(--warn)" }}
+          >
+            Sign-in is not configured on this deployment, so anyone with the link has full access. Set
+            NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to turn authentication on.
+          </p>
+        ) : (
+          <>
+            {members.length ? (
+              <ul className="mb-3 divide-y divide-[color:var(--border)]">
+                {members.map((m) => (
+                  <li key={m.id} className="flex items-center gap-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] font-semibold text-ink">
+                        {m.full_name || "Unnamed member"}
+                      </div>
+                      <div className="font-mono text-[11px] text-ink-3">{m.user_id.slice(0, 8)}…</div>
+                    </div>
+                    <span className="pill" style={{ background: "var(--brand-soft)", color: "var(--brand-ink)" }}>
+                      {m.role}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {invites.length ? (
+              <ul className="mb-3 divide-y divide-[color:var(--border)]">
+                {invites.map((i) => {
+                  const revoke = revokeInviteAction.bind(null, i.id);
+                  return (
+                    <li key={i.id} className="flex items-center gap-3 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px] text-ink-2">{i.email}</div>
+                        <div className="text-[11px] text-ink-3">invited as {i.role} · not yet joined</div>
+                      </div>
+                      <form action={revoke}>
+                        <button className="btn btn-ghost text-[12px]" type="submit">
+                          Cancel
+                        </button>
+                      </form>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+
+            <form action={inviteMemberAction} className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[12rem] flex-1">
+                <label className="label" htmlFor="inviteEmail">
+                  Invite a colleague
+                </label>
+                <input id="inviteEmail" name="inviteEmail" type="email" placeholder="kiran@yourfirm.in" className="field" />
+              </div>
+              <div>
+                <label className="label" htmlFor="inviteRole">
+                  Role
+                </label>
+                <select id="inviteRole" name="inviteRole" defaultValue="staff" className="field">
+                  <option value="staff">Staff</option>
+                  <option value="admin">Admin</option>
+                  <option value="owner">Owner</option>
+                </select>
+              </div>
+              <button className="btn" type="submit">
+                Invite
+              </button>
+            </form>
+            <p className="mt-2 text-[11px] leading-snug text-ink-3">
+              They create an account with that email and are attached to this firm automatically. Vahi does not
+              send the invitation email yet — tell them yourself.
+            </p>
+          </>
+        )}
+      </section>
 
       <section className="card p-4">
         <SectionHead

@@ -20,6 +20,22 @@ const check = (name, ok, detail = "") => {
   ok ? pass++ : fail++;
 };
 
+// Supabase provides the auth schema and its users table; plain Postgres does
+// not. Stub the shape the migrations reference so 0005 applies unchanged —
+// testing against a doctored copy of the migration would test nothing.
+await db.exec(`
+  create schema if not exists auth;
+  create table if not exists auth.users (
+    id uuid primary key default gen_random_uuid(),
+    email text
+  );
+  -- RLS policies reference auth.uid(); Supabase defines it from the request
+  -- JWT, and here it only has to exist for the policy to be creatable.
+  create or replace function auth.uid() returns uuid language sql stable as $fn$
+    select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+  $fn$;
+`);
+
 // Supabase ships these roles; PGlite does not. Create them so 0002 runs as-is.
 await db.exec(`
   do $$ begin

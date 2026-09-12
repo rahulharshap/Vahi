@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { signOutAction } from "@/app/auth-actions";
 
 const LINKS = [
   { href: "/board", label: "Board", hint: "What needs attention", icon: BoardIcon },
@@ -24,7 +25,19 @@ function useActive() {
  * get room to breathe, and there is somewhere obvious to add Reports and
  * Settings without the header turning into a scroll.
  */
-export function Sidebar({ firmName, city }: { firmName: string; city: string }) {
+export function Sidebar({
+  firmName,
+  city,
+  userEmail,
+  userName,
+  role,
+}: {
+  firmName: string;
+  city: string;
+  userEmail?: string | null;
+  userName?: string | null;
+  role?: string | null;
+}) {
   const isActive = useActive();
   return (
     <aside className="sticky top-0 hidden h-dvh w-[232px] shrink-0 flex-col border-r border-line bg-[color:var(--surface)] lg:flex">
@@ -102,6 +115,22 @@ export function Sidebar({ firmName, city }: { firmName: string; city: string }) 
           {firmName}
         </div>
         <div className="text-[11px] text-ink-3">{city}</div>
+
+        {userEmail ? (
+          <div className="mt-2.5 border-t border-line pt-2.5">
+            <div className="truncate text-[11.5px] font-semibold text-ink-2" title={userEmail}>
+              {userName || userEmail}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="truncate text-[10.5px] text-ink-3">{role ?? "member"}</span>
+              <form action={signOutAction} className="ml-auto">
+                <button type="submit" className="text-[10.5px] font-semibold text-ink-3 hover:text-ink">
+                  Sign out
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : null}
       </div>
     </aside>
   );
