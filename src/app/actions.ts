@@ -29,6 +29,7 @@ import {
 import { type Stage } from "@/lib/whatsapp";
 import { channelsFor, deliver } from "@/lib/notify";
 import { composeFromTemplate } from "@/lib/messages";
+import { audit } from "@/lib/log";
 import { replyAddress } from "@/lib/intake";
 import { reseed } from "@/lib/seed";
 import type { EntityType, GstScheme } from "@/lib/compliance";
@@ -65,13 +66,16 @@ export async function createClientAction(fd: FormData) {
   if (!input.name) throw new Error("Client name is required");
   const id = await createClient(input);
   const today = todayISO();
-  await syncClientFilings(id, addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
+  const generated = await syncClientFilings(id, addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
+  await audit({ action: "client.created", entity: "client", entityId: id, detail: { name: input.name, filings: generated } });
   refresh();
   redirect("/clients/" + id);
 }
 
 export async function updateClientAction(id: string, fd: FormData) {
-  await updateClient(id, parseClient(fd));
+  const input = parseClient(fd);
+  await updateClient(id, input);
+  await audit({ action: "client.updated", entity: "client", entityId: id, detail: { name: input.name } });
   const today = todayISO();
   await syncClientFilings(id, addDays(today, WINDOW_BACK), addDays(today, WINDOW_FWD));
   refresh();
@@ -80,12 +84,14 @@ export async function updateClientAction(id: string, fd: FormData) {
 
 export async function deleteClientAction(id: string) {
   await deleteClient(id);
+  await audit({ action: "client.deleted", entity: "client", entityId: id });
   refresh();
   redirect("/clients");
 }
 
 export async function setStatusAction(filingId: string, status: FilingStatus) {
   await setFilingStatus(filingId, status);
+  await audit({ action: "filing.status", entity: "filing", entityId: filingId, detail: { status } });
   refresh();
 }
 
@@ -97,6 +103,7 @@ export async function toggleDocAction(filingId: string, doc: string) {
 export async function setExtendedDueAction(filingId: string, fd: FormData) {
   const raw = String(fd.get("extendedDue") ?? "").trim();
   await setExtendedDue(filingId, raw || null);
+  await audit({ action: "filing.extended", entity: "filing", entityId: filingId, detail: { extendedDue: raw || null } });
   refresh();
 }
 
@@ -164,6 +171,7 @@ export async function sendChaseAction(filingId: string, stage: Stage) {
     }
     await recordMessage(f.id, f.client_id, stage, composed.body, status, channel);
   }
+  await audit({ action: "chase.sent", entity: "filing", entityId: f.id, detail: { stage, channels } });
   refresh();
 }
 
@@ -215,6 +223,7 @@ export async function assignDocumentAction(documentId: string, fd: FormData) {
   const [filingId, docLabel] = target.split("::");
   if (!filingId) return;
   await assignDocument(documentId, filingId, docLabel || null);
+  await audit({ action: "document.assigned", entity: "document", entityId: documentId, detail: { filingId, docLabel } });
   refresh();
 }
 
@@ -254,6 +263,7 @@ export async function saveFirmAction(fd: FormData) {
     chase_lookback_days: Number(fd.get("chase_lookback_days") ?? 45) || 45,
   };
   await updateSettings(firmId, settings);
+  await audit({ action: "settings.updated", entity: "firm", entityId: firmId, detail: { fields: Object.keys(settings) } });
   refresh();
 }
 
@@ -262,6 +272,7 @@ export async function createApiKeyAction(fd: FormData) {
   const name = String(fd.get("keyName") ?? "").trim() || "Untitled key";
   const scopes = String(fd.get("scopes") ?? "read") as "read" | "write" | "admin";
   const created = await createApiKey(firmId, name, scopes);
+  await audit({ action: "apikey.created", entity: "api_key", entityId: created.id, detail: { name, scopes } });
   refresh();
   // the plaintext is shown once, via the URL, and never stored
   redirect("/settings?created=" + encodeURIComponent(created.plaintext));
@@ -269,6 +280,7 @@ export async function createApiKeyAction(fd: FormData) {
 
 export async function revokeApiKeyAction(id: string) {
   await revokeApiKey(await currentFirmId(), id);
+  await audit({ action: "apikey.revoked", entity: "api_key", entityId: id });
   refresh();
 }
 

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { q, one, exec, uid, nowISO } from "./db";
 
 /**
@@ -41,6 +42,31 @@ export interface FirmSettings {
 
 // ------------------------------------------------------------------ current
 
+/**
+ * Per-request tenant scope.
+ *
+ * An API request acts for the firm its key belongs to, and every query in
+ * store.ts calls currentFirmId() without knowing that. AsyncLocalStorage
+ * carries the firm through the whole async call tree, so scoping an API
+ * handler is one wrapper rather than a firmId parameter threaded through
+ * forty functions — and a function that forgets to pass it cannot silently
+ * read another tenant's rows.
+ */
+const scope = new AsyncLocalStorage<{ firmId: string; actor: string; actorKind: "USER" | "API" | "SYSTEM" }>();
+
+export function runAsFirm<T>(
+  ctx: { firmId: string; actor: string; actorKind: "USER" | "API" | "SYSTEM" },
+  fn: () => Promise<T>,
+): Promise<T> {
+  return scope.run(ctx, fn);
+}
+
+/** The actor this request acts as, for the audit trail. */
+export function currentActor(): { actor: string; actorKind: "USER" | "API" | "SYSTEM" } {
+  const ctx = scope.getStore();
+  return ctx ? { actor: ctx.actor, actorKind: ctx.actorKind } : { actor: "ui", actorKind: "USER" };
+}
+
 let cachedFirmId: string | null = null;
 
 /**
@@ -51,6 +77,8 @@ let cachedFirmId: string | null = null;
  * a second firm is onboarded — which is exactly when auth has to exist.
  */
 export async function currentFirmId(): Promise<string> {
+  const ctx = scope.getStore();
+  if (ctx) return ctx.firmId;
   if (process.env.DEFAULT_FIRM_ID) return process.env.DEFAULT_FIRM_ID;
   if (cachedFirmId) return cachedFirmId;
   const row = await one<{ id: string }>(

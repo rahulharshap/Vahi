@@ -72,6 +72,11 @@ across a 400-day window, in realistic states of completion.
 RLS, so nothing breaks — but the public key that ships to browsers can read
 nothing. That is the correct posture until Supabase Auth is wired up.
 
+## API
+
+A key-authenticated REST surface at `/api/v1`, primarily so the app can be
+tested without a browser. See [API.md](API.md).
+
 ## Layout
 
 | Path | What lives there |
