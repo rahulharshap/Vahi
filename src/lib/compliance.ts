@@ -59,6 +59,10 @@ interface Rule {
   authority: string;
   docsRequired: string[];
   penaltyNote: string;
+  /** Human reading of `applies`. A predicate cannot be turned into a sentence. */
+  appliesWhen: string;
+  /** Human reading of `expand`. */
+  schedule: string;
   applies: (c: ClientProfile) => boolean;
   expand: (c: ClientProfile, from: Date, to: Date) => Expanded[];
 }
@@ -183,6 +187,8 @@ const GST_DOCS = [
 export const RULES: Rule[] = [
   {
     code: "GSTR1_M",
+    appliesWhen: "GST-registered on the regular monthly scheme",
+    schedule: "11th of the following month",
     title: "GSTR-1 (outward supplies)",
     category: "GST",
     authority: "GSTN",
@@ -193,6 +199,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "GSTR3B_M",
+    appliesWhen: "GST-registered on the regular monthly scheme",
+    schedule: "20th of the following month",
     title: "GSTR-3B (summary return and tax payment)",
     category: "GST",
     authority: "GSTN",
@@ -203,6 +211,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "GSTR1_Q",
+    appliesWhen: "GST-registered under QRMP",
+    schedule: "13th of the month after each quarter",
     title: "GSTR-1 quarterly (QRMP)",
     category: "GST",
     authority: "GSTN",
@@ -219,6 +229,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "GSTR3B_Q",
+    appliesWhen: "GST-registered under QRMP",
+    schedule: "22nd of the month after each quarter",
     title: "GSTR-3B quarterly (QRMP)",
     category: "GST",
     authority: "GSTN",
@@ -235,6 +247,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "CMP08",
+    appliesWhen: "GST composition scheme",
+    schedule: "18th of the month after each quarter",
     title: "CMP-08 (composition quarterly statement)",
     category: "GST",
     authority: "GSTN",
@@ -251,6 +265,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "GSTR9",
+    appliesWhen: "GST-registered, regular or QRMP (not composition)",
+    schedule: "31 December after the financial year",
     title: "GSTR-9 annual return",
     category: "GST",
     authority: "GSTN",
@@ -265,6 +281,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "TDS_PAY",
+    appliesWhen: "Deducts TDS or collects TCS",
+    schedule: "7th of the following month",
     title: "TDS / TCS deposit",
     category: "TDS",
     authority: "Income Tax Dept",
@@ -275,6 +293,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "TDS_RETURN",
+    appliesWhen: "Deducts TDS or collects TCS",
+    schedule: "31 Jul, 31 Oct, 31 Jan, and 31 May for the final quarter",
     title: "TDS return (24Q / 26Q)",
     category: "TDS",
     authority: "TRACES",
@@ -295,6 +315,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "ADV_TAX",
+    appliesWhen: "Every entity except individuals, plus any individual in tax audit",
+    schedule: "15 Jun, 15 Sep, 15 Dec, 15 Mar",
     title: "Advance tax instalment",
     category: "INCOME_TAX",
     authority: "Income Tax Dept",
@@ -325,6 +347,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "ITR_NONAUDIT",
+    appliesWhen: "Not a tax audit case",
+    schedule: "31 July after the financial year",
     title: "Income tax return (non-audit)",
     category: "INCOME_TAX",
     authority: "Income Tax Dept",
@@ -341,6 +365,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "TAX_AUDIT",
+    appliesWhen: "Tax audit case",
+    schedule: "30 September after the financial year",
     title: "Tax audit report (3CA/3CB and 3CD)",
     category: "INCOME_TAX",
     authority: "Income Tax Dept",
@@ -356,6 +382,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "ITR_AUDIT",
+    appliesWhen: "Tax audit case",
+    schedule: "31 October after the financial year",
     title: "Income tax return (audit case)",
     category: "INCOME_TAX",
     authority: "Income Tax Dept",
@@ -366,6 +394,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "AOC4",
+    appliesWhen: "Private limited companies",
+    schedule: "30 October, being 30 days after the AGM",
     title: "AOC-4 (financial statements)",
     category: "ROC",
     authority: "MCA",
@@ -376,6 +406,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "MGT7",
+    appliesWhen: "Private limited companies",
+    schedule: "29 November, being 60 days after the AGM",
     title: "MGT-7 (annual return)",
     category: "ROC",
     authority: "MCA",
@@ -386,6 +418,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "LLP11",
+    appliesWhen: "Limited liability partnerships",
+    schedule: "30 May, annually",
     title: "LLP Form 11 (annual return)",
     category: "ROC",
     authority: "MCA",
@@ -396,6 +430,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "LLP8",
+    appliesWhen: "Limited liability partnerships",
+    schedule: "30 October, annually",
     title: "LLP Form 8 (statement of account and solvency)",
     category: "ROC",
     authority: "MCA",
@@ -406,6 +442,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "DIR3KYC",
+    appliesWhen: "Private limited companies and LLPs with at least one director or partner",
+    schedule: "30 September, annually",
     title: "DIR-3 KYC (director KYC)",
     category: "ROC",
     authority: "MCA",
@@ -416,6 +454,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "PF_ECR",
+    appliesWhen: "Has employees",
+    schedule: "15th of the following month",
     title: "PF electronic challan (ECR)",
     category: "PAYROLL",
     authority: "EPFO",
@@ -426,6 +466,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "ESI",
+    appliesWhen: "Has employees",
+    schedule: "15th of the following month",
     title: "ESI contribution",
     category: "PAYROLL",
     authority: "ESIC",
@@ -436,6 +478,8 @@ export const RULES: Rule[] = [
   },
   {
     code: "PT_TS",
+    appliesWhen: "Has employees and is registered in Telangana",
+    schedule: "10th of the following month",
     title: "Professional tax (Telangana)",
     category: "PAYROLL",
     authority: "CT Dept, Telangana",

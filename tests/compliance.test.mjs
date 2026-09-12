@@ -115,6 +115,10 @@ check("non-audit case files ITR on 31 Jul", dates(notAudited, "ITR_NONAUDIT").in
 // -------------------------------------------------------------- invariants
 console.log("\n--- invariants ---");
 check("every rule has a penalty note", RULES.every((r) => r.penaltyNote && r.penaltyNote.length > 10));
+check("every rule says who it applies to", RULES.every((r) => r.appliesWhen && r.appliesWhen.length > 10),
+  RULES.filter((r) => !r.appliesWhen).map((r) => r.code).join(",") || "all present");
+check("every rule describes its schedule", RULES.every((r) => r.schedule && r.schedule.length > 5),
+  RULES.filter((r) => !r.schedule).map((r) => r.code).join(",") || "all present");
 check("every rule declares required documents", RULES.every((r) => Array.isArray(r.docsRequired)));
 check("rule codes are unique", new Set(RULES.map((r) => r.code)).size === RULES.length);
 check("occurrences come back sorted by due date", full.every((o, i) => i === 0 || full[i - 1].dueDate <= o.dueDate));
