@@ -54,12 +54,15 @@ function Hero() {
             Not a calendar — a risk board ranked by cost, and a chaser that escalates on its own.
           </p>
           <div className="mt-7 flex flex-wrap items-center gap-3">
+            <Link href="/board" className="btn btn-primary px-5 py-2.5 text-[14px]">
+              Open the live demo
+            </Link>
             <a href="#ladder" className="btn px-5 py-2.5 text-[14px]">
               See how the chasing works
             </a>
           </div>
           <p className="mt-4 text-[12.5px] leading-relaxed text-ink-3">
-            Live demo in the header. Sample data, fictional Hyderabad practice, no signup.
+            Sample data, a fictional Hyderabad practice, no signup. Nothing you click is saved.
           </p>
         </div>
 
