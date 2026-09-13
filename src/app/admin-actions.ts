@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { assertWritable } from "@/lib/guest";
 import { redirect } from "next/navigation";
 import { currentUser, inviteToFirm, SeatLimitReached, type Role } from "@/lib/auth";
 import { createFirm, setFirmActive, setMaxMembers } from "@/lib/tenant";
@@ -24,6 +25,7 @@ async function requirePlatformAdmin() {
 }
 
 export async function createFirmAction(fd: FormData) {
+  await assertWritable();
   const admin = await requirePlatformAdmin();
   const name = String(fd.get("name") ?? "").trim();
   const city = String(fd.get("city") ?? "").trim();
@@ -55,6 +57,7 @@ export async function createFirmAction(fd: FormData) {
 }
 
 export async function setSeatsAction(firmId: string, fd: FormData) {
+  await assertWritable();
   const admin = await requirePlatformAdmin();
   const raw = String(fd.get("maxMembers") ?? "").trim();
   const max = raw ? Number(raw) || null : null;
@@ -66,6 +69,7 @@ export async function setSeatsAction(firmId: string, fd: FormData) {
 }
 
 export async function toggleFirmActiveAction(firmId: string, active: boolean) {
+  await assertWritable();
   const admin = await requirePlatformAdmin();
   await setFirmActive(firmId, active);
   await runAsFirm({ firmId, actor: admin.email, actorKind: "USER" }, () =>
@@ -75,6 +79,7 @@ export async function toggleFirmActiveAction(firmId: string, active: boolean) {
 }
 
 export async function inviteOwnerAction(firmId: string, fd: FormData) {
+  await assertWritable();
   const admin = await requirePlatformAdmin();
   const email = String(fd.get("ownerEmail") ?? "").trim().toLowerCase();
   const role = (String(fd.get("role") ?? "owner") as Role) ?? "owner";

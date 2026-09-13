@@ -309,6 +309,24 @@ account: the owner is invited by email and signs up themselves, so no password
 is minted by one person and handed to another, and they verify their own
 address.
 
+### Sharing a demo for feedback
+
+`DEMO_GUEST=1` lets anyone with the link look around without signing in, and
+change nothing. Every mutating server action refuses, and write controls render
+disabled with an explanation rather than throwing a server error.
+
+Use it instead of sharing one login. A shared login is a password that leaks,
+no record of who looked, and a visitor who can delete the demo for everyone
+else. A guest has none of those problems and no signup friction, which matters
+when the person you are asking for feedback has ten minutes.
+
+`/admin` stays shut to guests — it checks the signed-in identity, and a guest
+has none.
+
+**Never enable this on a deployment holding a real client list.** The intended
+shape is two deployments against the same repo: production with authentication
+on, and a demo with `DEMO_GUEST=1` and seeded sample data.
+
 ### Seat limits
 
 Each firm has an optional `max_members`. Blank means unlimited, which is the

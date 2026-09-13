@@ -11,6 +11,9 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 const PUBLIC = ["/login", "/landing", "/auth", "/api/v1", "/api/inbound", "/api/seed", "/api/diag"];
 
+// /admin is never reachable as a guest: it checks platformAdmin on the page,
+// and a guest has no identity to check.
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   let res = NextResponse.next({ request: req });
@@ -38,8 +41,14 @@ export async function middleware(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Read-only guest mode lets a visitor look around without signing in. The
+  // write guard lives in the server actions, not here — middleware can only
+  // see the request, and a server action is an endpoint anyone who reaches the
+  // page can invoke.
+  const guest = process.env.DEMO_GUEST === "1" || process.env.DEMO_GUEST === "true";
+
   const isPublic = PUBLIC.some((p) => pathname === p || pathname.startsWith(p + "/"));
-  if (!user && !isPublic) {
+  if (!user && !isPublic && !guest) {
     const to = req.nextUrl.clone();
     to.pathname = "/login";
     // so a deep link survives the round trip through sign-in

@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { Sidebar, TopBar, BottomTabs } from "@/components/Nav";
 import DemoBanner from "@/components/DemoBanner";
 import { firmSafe } from "@/lib/store";
 import { authConfigured, currentUser } from "@/lib/auth";
+import { isGuest } from "@/lib/guest";
+import GuestReadOnly from "@/components/GuestReadOnly";
 import { signOutAction } from "@/app/auth-actions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -29,6 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     );
   }
 
+  const guest = await isGuest();
   const f = await firmSafe();
   // set NEXT_PUBLIC_DEMO_MODE=false once this holds a real firm's data
   const demo = process.env.NEXT_PUBLIC_DEMO_MODE !== "false";
@@ -45,8 +49,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       />
       <div className="min-w-0 flex-1">
         <TopBar firmName={f.name} city={f.city} />
+        {guest ? (
+          <div
+            className="border-b px-4 py-2 text-center text-[12.5px] font-semibold md:px-6"
+            style={{ background: "var(--brand-soft)", borderColor: "var(--brand)", color: "var(--brand-ink)" }}
+          >
+            You are viewing a read-only demo — nothing you do here is saved.{" "}
+            <Link href="/login" className="underline">
+              Sign in
+            </Link>{" "}
+            to make changes.
+          </div>
+        ) : null}
         {demo ? <DemoBanner /> : null}
         <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-4 md:px-6 lg:pb-12 lg:pt-6">{children}</main>
+        {guest ? <GuestReadOnly /> : null}
       </div>
       <BottomTabs />
     </div>
